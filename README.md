@@ -7,6 +7,8 @@
 [![coverage][coverage-src]][coverage-href]
 [![License][license-src]][license-href]
 
+> 注意，该项目还未完成，所以暂时不能安装
+
 基于 [T-Auto/dsh-ops](<https://github.com/T-Auto/dsh-ops>) fork，仅新增以下改动：
 
 - **多平台适配**：支持 Windows、macOS、Linux 的平台原生运行时构建。
