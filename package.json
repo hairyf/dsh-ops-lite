@@ -67,7 +67,7 @@
     "test": "pnpm run build && vitest",
     "test:e2e": "node test/e2e/run.mjs",
     "typecheck": "tsc",
-    "prepare": "git config core.hooksPath .githooks && simple-git-hooks && skills-npm"
+    "preinstall": "git config core.hooksPath .githooks && simple-git-hooks && skills-npm"
   },
   "scripts-info": {
     "build": "Build the library for publishing",
