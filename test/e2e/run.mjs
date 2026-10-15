@@ -107,6 +107,13 @@ async function main() {
       const manifest = JSON.parse(await run(['-xOf', file, 'package/package.json'], { executable: tar, capture: true }))
       assert.equal(manifest.name, name)
       assert.equal(manifest.version, packed.version)
+      if (process.platform !== 'win32' && name === `dsh-ops-lite-${target}`) {
+        const listing = (await run(['-tvf', file], { executable: tar, capture: true })).split('\n')
+        for (const executable of ['dsh-ops-worker', 'fastctx']) {
+          const entry = listing.find(line => line.endsWith(` package/runtime/${target}/${executable}`))
+          assert(entry?.startsWith('-rwxr-xr-x'), `The platform tarball must retain mode 0755 for ${executable}: ${entry ?? 'missing'}`)
+        }
+      }
       for (const lifecycle of ['preinstall', 'install', 'postinstall'])
         assert.equal(manifest.scripts?.[lifecycle], undefined, `${name} must not need an installer or compilation hook.`)
       assert.deepEqual(manifest.dependencies ?? {}, {}, `${name} must not add external runtime JavaScript dependencies.`)

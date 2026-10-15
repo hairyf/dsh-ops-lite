@@ -53,6 +53,9 @@
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dsh": {
     "client": {
       "inject": [

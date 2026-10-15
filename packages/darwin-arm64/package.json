@@ -12,5 +12,11 @@
   "cpu": ["arm64"],
   "exports": { "./package.json": "./package.json" },
   "files": ["licenses", "runtime"],
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public",
+    "executableFiles": [
+      "./runtime/darwin-arm64/dsh-ops-worker",
+      "./runtime/darwin-arm64/fastctx"
+    ]
+  }
 }

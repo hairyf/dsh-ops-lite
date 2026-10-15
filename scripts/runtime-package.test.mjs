@@ -8,7 +8,7 @@ import { loadBumpConfig, versionBump } from 'bumpp'
 import { expect, it } from 'vitest'
 import { syncNativeVersion } from '../bump.config.ts'
 import manifest from '../package.json' with { type: 'json' }
-import { resolveBinary, runtimeRoot } from '../src/ops/binary.js'
+import { executableName, resolveBinary, runtimeRoot } from '../src/ops/binary.js'
 import { resolveWorker, workerName } from '../src/ops/ptc/runtime.js'
 import { bundledShellPath } from '../src/ops/shells.js'
 
@@ -76,6 +76,20 @@ it('loads the release configuration and bumps every package and native crate tog
   }
   finally {
     fs.rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+it('marks every Unix runtime executable for npm consumers', () => {
+  // `pnpm pack` writes 0644 unless the manifest lists the file here, and Unix
+  // consumers execute these directly; `test/e2e/run.mjs` asserts the packed mode.
+  for (const target of ['linux-x64', 'darwin-arm64']) {
+    const [platform] = target.split('-')
+    const file = fileURLToPath(new URL(`../packages/${target}/package.json`, import.meta.url))
+    const publishConfig = JSON.parse(fs.readFileSync(file, 'utf8')).publishConfig
+    expect(publishConfig.executableFiles).toEqual([
+      `./runtime/${target}/${workerName(platform)}`,
+      `./runtime/${target}/${executableName(platform)}`,
+    ])
   }
 })
 

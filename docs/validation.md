@@ -49,6 +49,10 @@ node scripts/measure-install.mjs .cache/dsh-ops-lite-0.1.0.tgz .cache/dsh-ops-li
 
 npm 仅选择当前平台，不安装其他系统的运行时，无下载器或编译安装脚本。分包并未明显缩减完整 Windows 运行时，**上游 #37 的大体积问题仍未解决**；没有用删除功能换取体积。
 
+## 打包权限约束
+
+`pnpm pack` 会把非 `bin` 文件统一写成 `0644`，磁盘上的执行位不会进入 tgz。首个交付提交因此在 Unix 上出现 `spawn .../dsh-ops-worker EACCES`（worker 尚未启动，非产品逻辑失败）。两个 Unix 平台包现在用 pnpm 原生字段 `publishConfig.executableFiles` 声明 worker 与 fastctx；实测磁盘 `0644` 打包后为 `-rwxr-xr-x`。`scripts/runtime-package.test.mjs` 固定这两个清单，[E2E runner](<../test/e2e/run.mjs>) 在 Unix 上直接断言已打包 tgz 的记录模式，不靠安装后 `chmod` 掩盖。
+
 ## 检查与 E2E
 
 [CI](https://github.com/hairyf/dsh-ops-lite/actions/workflows/ci.yml) 在三平台运行本地检查、原生 Rust 回归和真实隔离 Harness + Chromium L2。必须查看交付提交对应的所有适用 job；旧提交、跳过或只做编译不算功能通过。

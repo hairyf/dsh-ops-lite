@@ -13,5 +13,11 @@
   "libc": ["glibc"],
   "exports": { "./package.json": "./package.json" },
   "files": ["licenses", "runtime"],
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public",
+    "executableFiles": [
+      "./runtime/linux-x64/dsh-ops-worker",
+      "./runtime/linux-x64/fastctx"
+    ]
+  }
 }
