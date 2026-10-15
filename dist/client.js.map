@@ -1,0 +1,1 @@
+{"version":3,"file":"client.js","names":[],"sources":["../src/client/index.ts"],"sourcesContent":["import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'\r\n\r\nexport function apply(_ctx: ClientContext): void {\r\n}\r\n"],"mappings":";mEAEA,SAAgB,EAAM,EAA2B,CACjD"}

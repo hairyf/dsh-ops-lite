@@ -1,0 +1,12 @@
+.cache
+.DS_Store
+.githooks
+.idea
+*.log
+*.tgz
+coverage
+lib-cov
+logs
+node_modules
+**/skills/npm-*
+temp

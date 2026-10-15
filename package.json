@@ -1,0 +1,125 @@
+{
+  "name": "pkg-placeholder",
+  "type": "module",
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.15.1",
+  "description": "_description_",
+  "author": "Hairy <wwu710632@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/dsh-tauri-desk/pkg-placeholder#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsh-tauri-desk/pkg-placeholder.git"
+  },
+  "bugs": "https://github.com/dsh-tauri-desk/pkg-placeholder/issues",
+  "keywords": [],
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "README.md",
+    "cordis.patch.yml",
+    "dist"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint",
+    "prepack": "nr build",
+    "release": "bumpp",
+    "start": "tsx src/index.ts",
+    "test": "pnpm run build && vitest",
+    "typecheck": "tsc",
+    "prepare": "git config core.hooksPath .githooks && simple-git-hooks && skills-npm"
+  },
+  "scripts-info": {
+    "build": "Build the library for publishing",
+    "dev": "Rebuild on change during development",
+    "lint": "Check for code style issues",
+    "prepack": "Build before publishing",
+    "release": "Bump version and publish a release",
+    "start": "Run the entry file",
+    "test": "Run the test suite",
+    "typecheck": "Check types",
+    "prepare": "Set up git hooks and skills"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "catalog:cli",
+    "@antfu/ni": "catalog:cli",
+    "@antfu/utils": "catalog:inlined",
+    "@deepseek-ai/cordis": "catalog:dsh",
+    "@deepseek-ai/cordis-plugin-group": "catalog:dsh",
+    "@deepseek-ai/cordis-plugin-include": "catalog:dsh",
+    "@deepseek-ai/cordis-plugin-loader": "catalog:dsh",
+    "@deepseek-ai/dsh-agent": "catalog:dsh",
+    "@deepseek-ai/dsh-agent-default-model": "catalog:dsh",
+    "@deepseek-ai/dsh-agent-loop": "catalog:dsh",
+    "@deepseek-ai/dsh-agent-preset": "catalog:dsh",
+    "@deepseek-ai/dsh-agent-preset-registry": "catalog:dsh",
+    "@deepseek-ai/dsh-api-session-controller": "catalog:dsh",
+    "@deepseek-ai/dsh-api-workspace-controller": "catalog:dsh",
+    "@deepseek-ai/dsh-client-connection": "catalog:dsh",
+    "@deepseek-ai/dsh-client-locale": "catalog:dsh",
+    "@deepseek-ai/dsh-client-store": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-conversation": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-layout": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-primitives": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-renderer": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-session": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-settings": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-slots": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-theme": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-workspace": "catalog:dsh",
+    "@deepseek-ai/dsh-host-webserver": "catalog:dsh",
+    "@deepseek-ai/dsh-llm": "catalog:dsh",
+    "@deepseek-ai/dsh-permission-presets": "catalog:dsh",
+    "@deepseek-ai/dsh-session": "catalog:dsh",
+    "@deepseek-ai/dsh-session-persistence": "catalog:dsh",
+    "@deepseek-ai/dsh-session-projection": "catalog:dsh",
+    "@deepseek-ai/dsh-skill-filesystem": "catalog:dsh",
+    "@deepseek-ai/dsh-tools": "catalog:dsh",
+    "@deepseek-ai/dsh-user-approval": "catalog:dsh",
+    "@deepseek-ai/dsh-user-questions": "catalog:dsh",
+    "@deepseek-ai/dsh-util-code-language": "catalog:dsh",
+    "@deepseek-ai/dsh-util-values": "catalog:dsh",
+    "@deepseek-ai/dsh-workspace": "catalog:dsh",
+    "@types/node": "catalog:types",
+    "bumpp": "catalog:cli",
+    "eslint": "catalog:cli",
+    "nano-staged": "catalog:cli",
+    "publint": "catalog:cli",
+    "simple-git-hooks": "catalog:cli",
+    "skills-npm": "catalog:cli",
+    "tsdown": "catalog:cli",
+    "tsdown-stale-guard": "catalog:testing",
+    "tsnapi": "catalog:testing",
+    "tsx": "catalog:cli",
+    "typescript": "catalog:cli",
+    "vite": "catalog:cli",
+    "vitest": "catalog:testing"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm i --frozen-lockfile --ignore-scripts --offline && pnpm run build && npx nano-staged"
+  },
+  "nano-staged": {
+    "*": "eslint --fix"
+  }
+}

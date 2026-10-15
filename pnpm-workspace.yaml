@@ -1,0 +1,77 @@
+catalogMode: prefer
+ignoreWorkspaceRootCheck: true
+minimumReleaseAgeExclude:
+  - '@types/node@25.9.0'
+  - tsx@4.22.2
+  - bumpp@12.0.0
+shellEmulator: true
+trustPolicy: no-downgrade
+
+packages:
+  - playground
+  - docs
+  - packages/*
+  - examples/*
+
+catalogs:
+  cli:
+    '@antfu/eslint-config': ^9.1.0
+    '@antfu/ni': ^30.2.0
+    bumpp: ^12.0.0
+    eslint: ^10.7.0
+    nano-staged: ^1.0.2
+    publint: ^0.3.21
+    simple-git-hooks: ^2.13.1
+    skills-npm: ^1.2.0
+    tsdown: ^0.22.12
+    tsx: ^4.23.1
+    typescript: ^6.0.3
+    vite: ^8.1.5
+  dsh:
+    '@deepseek-ai/cordis': 4.0.5-alpha.1
+    '@deepseek-ai/cordis-plugin-group': 1.0.5-alpha.1
+    '@deepseek-ai/cordis-plugin-include': 1.0.10-alpha.1
+    '@deepseek-ai/cordis-plugin-loader': 1.0.6-alpha.1
+    '@deepseek-ai/dsh-agent': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-agent-default-model': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-agent-loop': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-agent-preset': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-agent-preset-registry': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-api-session-controller': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-api-workspace-controller': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-connection': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-locale': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-store': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-conversation': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-layout': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-primitives': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-renderer': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-session': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-settings': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-slots': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-theme': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-client-ui-workspace': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-host-webserver': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-llm': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-permission-presets': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-session': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-session-persistence': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-session-projection': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-skill-filesystem': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-tools': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-user-approval': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-user-questions': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-util-code-language': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-util-values': 0.2.1-alpha.1
+    '@deepseek-ai/dsh-workspace': 0.2.1-alpha.1
+  inlined:
+    '@antfu/utils': ^9.3.0
+  testing:
+    tsdown-stale-guard: ^0.1.3
+    tsnapi: ^1.0.0
+    vitest: ^4.1.10
+  types:
+    '@types/node': ^26.1.1
+allowBuilds:
+  esbuild: true
+  simple-git-hooks: true
