@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 // Always install a fresh CLI. Never discover or fall back to the user's Harness.
 async function main() {
-  const root = await mkdtemp(path.join(tmpdir(), 'dsh-ops-next-e2e-'))
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'dsh-ops-next-e2e-')))
   const installation = path.join(root, 'installation')
   const home = path.join(root, 'home')
   const project = fileURLToPath(new URL('../../', import.meta.url))
@@ -75,7 +75,7 @@ async function main() {
     await run([playwright, 'test', '--config', 'playwright.config.ts', ...process.argv.slice(2)])
   }
   finally {
-    assert.equal(path.dirname(root), tmpdir(), 'Refuse to remove a non-test directory.')
+    assert.equal(path.dirname(root), await realpath(tmpdir()), 'Refuse to remove a non-test directory.')
     assert(path.basename(root).startsWith('dsh-ops-next-e2e-'))
     if (keepTemp)
       console.warn(`Kept only this test-owned directory for debugging: ${root}`)

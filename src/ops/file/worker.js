@@ -27,9 +27,16 @@ function inside(root, target) {
 
 export async function invoke(ctx, file, tool, args, exec, signal) {
   const session = exec?.agent?.session
-  const cwd = session?.header?.cwd
+  let cwd = session?.header?.cwd
   if (!session?.id || typeof cwd !== 'string' || !path.isAbsolute(cwd))
     return failure('POLICY_DENIED', 'An authoritative session identity and cwd are required.')
+  try {
+    // Resolve the authority base, never the requested path: links within it remain forbidden.
+    cwd = fs.realpathSync.native(cwd)
+  }
+  catch (error) {
+    return failure('POLICY_DENIED', `The authoritative session cwd is unavailable. ${String(error?.message ?? error)}`)
+  }
   const policyService = ctx.get('sandboxPolicy')
   const subprocess = ctx.get('subprocess')
   if (!policyService?.resolve || !subprocess?.spawn)
