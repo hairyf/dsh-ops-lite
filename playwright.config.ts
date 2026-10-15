@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 30 * 60_000,
+  timeout: 180_000,
   expect: { timeout: 30_000 },
   forbidOnly: !!process.env.CI,
   outputDir: 'test-results/e2e',

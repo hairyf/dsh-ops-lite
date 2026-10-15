@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -33,9 +34,6 @@ export interface Host {
   url: string
   workspace: string
   outside: string
-  bashPath: string
-  confinedBashPath: string
-  provisionFastctx: () => Promise<void>
   schemas: (scope?: Scope) => Promise<Schemas>
   call: (name: string, args?: Record<string, unknown>, scope?: Scope) => Promise<ExecutionResult>
 }
@@ -64,6 +62,9 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   const root = process.env.DSH_E2E_ROOT
   const cli = process.env.DSH_E2E_DSH_BIN
   assert(root && cli, 'Use node test/e2e/run.mjs; DSH_E2E_DSH_BIN must be an independent temporary installation, with no fallback.')
+  assert(path.isAbsolute(root) && path.isAbsolute(cli), 'Require explicit absolute test paths.')
+  assert.equal(path.dirname(await realpath(root)), await realpath(tmpdir()), 'Require a test-owned temporary root.')
+  assert(path.basename(root).startsWith('dsh-ops-next-e2e-'))
   const installation = path.join(root, 'installation')
   const expectedCli = path.join(installation, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
   assert.equal(await realpath(cli), await realpath(expectedCli), 'Refuse an external or user-installed Harness.')
@@ -87,7 +88,7 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
   assert.equal(manifest.name, 'dsh-ops-next', 'Build the final plugin, not the untouched starter.')
   await access(path.join(project, 'dist/index.js'))
-  await access(path.join(project, `dist/upstream/runtime/${process.platform}-${process.arch}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
+  await access(path.join(project, `dist/runtime/${process.platform}-${process.arch}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
   // Copy built plugin only; all SDK imports resolve from this independent CLI tree.
   await cp(path.join(project, 'dist'), path.join(plugin, 'dist'), { recursive: true })
   await cp(path.join(project, 'cordis.patch.yml'), path.join(plugin, 'cordis.patch.yml'))
@@ -173,46 +174,10 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
         throw new Error(`Test API: ${response.status}: ${await response.text()}`)
       return response.json() as Promise<T>
     }
-    const bashPath = process.env.DSH_E2E_BASH_PATH ?? (process.platform === 'win32' ? path.join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe') : '/bin/bash')
-    await access(bashPath)
     return {
       url: launch,
       workspace,
       outside,
-      bashPath,
-      confinedBashPath: process.env.DSH_E2E_CONFINED_BASH_PATH ?? bashPath,
-      provisionFastctx: async () => {
-        // This explicit CLI action alone may build/install FastCtx, only in this test-owned home.
-        const provision = spawn(process.execPath, [path.join(plugin, 'dist/cli.js'), 'provision', '--fastctx', '--managed'], {
-          cwd: plugin,
-          env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: process.platform !== 'win32',
-          windowsHide: true,
-        })
-        let output = ''
-        const collect = (chunk: Buffer): void => {
-          output += chunk.toString()
-        }
-        provision.stdout!.on('data', collect)
-        provision.stderr!.on('data', collect)
-        const timer = setTimeout(() => {
-          void stop(provision)
-        }, 20 * 60_000)
-        try {
-          const code = await new Promise<number | null>((resolve, reject) => {
-            provision.once('error', reject)
-            provision.once('exit', resolve)
-          })
-          assert.equal(code, 0, `Explicit isolated FastCtx provisioning failed:\n${output}`)
-        }
-        finally {
-          clearTimeout(timer)
-          await stop(provision)
-          await writeFile(info.outputPath('fastctx-provision.log'), output)
-          await info.attach('FastCtx explicit provisioning', { path: info.outputPath('fastctx-provision.log'), contentType: 'text/plain' })
-        }
-      },
       schemas: (scope = 'native') => request(`/__e2e/schemas?scope=${scope}`),
       call: (name, args = {}, scope = 'native') => request('/__e2e/call', { name, arguments: args, scope }),
       stop: finish,

@@ -2,15 +2,18 @@ import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-tools'
-import type { OpsConfig, OpsConfigRef, RuntimeResolution } from './types'
+import type { OpsConfigRef } from './types'
 import process from 'node:process'
 import { Config } from './config'
 import { OFFICIAL_TOOLS, PACKAGE_NAME } from './constants'
-import { resolveNativeWorker, resolveRuntimes, upstreamModule } from './runtimes'
+import { resolveConfig } from './ops/config.js'
+import { applyComponent } from './ops/index.js'
+import { apply as applyPtc } from './ops/ptc/index.js'
+import { resolveShells } from './ops/shells.js'
 
 export { Config }
 export const name = PACKAGE_NAME
-export const inject = ['tools']
+export const inject = ['tools', 'sandboxPolicy', 'subprocess']
 
 function disableOfficialTools(ctx: Context): void {
   const denied = new Set<string>(OFFICIAL_TOOLS)
@@ -65,69 +68,22 @@ function disableOfficialTools(ctx: Context): void {
   refresh()
 }
 
-async function mount(ctx: Context, config: OpsConfig): Promise<void> {
-  const [runtimes, worker] = await Promise.all([resolveRuntimes(config), resolveNativeWorker(config)])
-  const status = {
-    components: { shell: config.enableShell, file: config.enableFile, background: config.enableBackground, ptc: config.enablePtc },
-    runtimeMode: config.runtimeMode,
-    allowLocalRuntimes: config.allowLocalRuntimes,
-    disableOfficialTools: config.disableOfficialTools,
-    runtimes: { ...runtimes, worker },
-  }
-  ctx.effect(() => ctx.tools.register({
-    name: 'ops_status',
-    description: 'Report enabled Ops components, runtime provenance, compatibility failures and explicit provisioning instructions. Never downloads or installs software.',
-    parameters: { type: 'object', properties: {}, additionalProperties: false },
-    output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }] },
-    async execute(args) {
-      if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length)
-        throw new Error('ops_status accepts an empty object only.')
-      return status
-    },
-    isConcurrencySafe: () => true,
-  }), 'dsh-ops-next: diagnostics')
-  if (config.disableOfficialTools)
-    disableOfficialTools(ctx)
-
-  const ensure = (runtime: RuntimeResolution, component: string): boolean => {
-    if (runtime.available)
-      return true
-    const message = `${component}: ${runtime.detail}`
-    if (config.required)
-      throw new Error(message)
-    ctx.logger.warn(message)
-    return false
-  }
-  const upstream = await import(upstreamModule('index.js'))
-  const common = {
-    required: config.required,
-    promptPolicy: config.promptPolicy,
-    ...(config.extraGuidance ? { extraGuidance: config.extraGuidance } : {}),
-    toolCallTimeoutMs: config.toolCallTimeoutMs,
-    enableShellTools: config.enableShellTools,
-    allowSystemShellFallback: false,
-    configUpdateVersion: 1,
-    ...(runtimes.bash.file ? { bashPath: runtimes.bash.file } : {}),
-  }
-  if (config.enableShell) {
-    if (config.publishBashTool)
-      ensure(runtimes.bash, 'Bash')
-    if (process.platform === 'win32')
-      ensure(runtimes.pwsh, 'PowerShell 7')
-    upstream.applyComponent(ctx, { ...common, publishBashTool: config.publishBashTool && runtimes.bash.available }, 'shell', { shells: runtimes })
-  }
-  if (config.enableFile && ensure(worker, 'Native file tools'))
-    upstream.applyComponent(ctx, { ...common, binaryPath: worker.file }, 'file')
-  if (config.enableBackground && config.enableShellTools && ensure(runtimes.fastctx, 'Background jobs') && ensure(runtimes.bash, 'Background Bash'))
-    upstream.applyComponent(ctx, { ...common, binaryPath: runtimes.fastctx.file }, 'background')
-  if (config.enablePtc && ensure(worker, 'PTC')) {
-    const ptc = await import(upstreamModule('ptc/index.js'))
-    ptc.apply(ctx, { binaryPath: worker.file, required: config.required })
-  }
+/** Mount the complete fork; missing shipped runtimes are an installation error, not a feature toggle. */
+function mount(ctx: Context): void {
+  const common = { required: true, allowSystemShellFallback: process.platform !== 'win32' }
+  const shells = resolveShells(resolveConfig(common))
+  if (!shells.bash.available)
+    throw new Error(`dsh-ops-next: Bash unavailable: ${shells.bash.detail}`)
+  const config = { ...common, bashPath: shells.bash.file }
+  applyComponent(ctx, config, 'shell')
+  applyComponent(ctx, config, 'file')
+  applyComponent(ctx, config, 'background')
+  applyPtc(ctx, { required: true })
 }
 
-/** Rebuild only our owned capability fiber after one atomic settings commit. */
+/** Changing the one optional policy must not unload the working Ops runtimes. */
 export async function apply(ctx: Context, config: OpsConfigRef): Promise<void> {
+  mount(ctx)
   let current: Fiber | undefined
   let stopped = false
   let chain = Promise.resolve()
@@ -138,8 +94,10 @@ export async function apply(ctx: Context, config: OpsConfigRef): Promise<void> {
       current = undefined
       if (stopped)
         return
-      current = ctx.plugin(child => mount(child, snapshot))
-      await current.await()
+      if (snapshot.disableOfficialTools) {
+        current = ctx.plugin(disableOfficialTools)
+        await current.await()
+      }
     })
     return chain
   }
@@ -148,6 +106,6 @@ export async function apply(ctx: Context, config: OpsConfigRef): Promise<void> {
     stopped = true
     await chain.catch(() => {})
     await current?.dispose()
-  }, 'dsh-ops-next: component lifecycle')
+  }, 'dsh-ops-next: official tool policy')
   await reconcile()
 }

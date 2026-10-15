@@ -7,41 +7,9 @@ export declare function apply(_: Context, _: OpsConfigRef): Promise<void>;
 
 // #region Variables
 export declare const Config: Schema<NoInfer<Schemastery.ObjectS<NoInfer<{
-  enableShell: Schema<boolean, boolean, "defined">;
-  enableFile: Schema<boolean, boolean, "defined">;
-  enableBackground: Schema<boolean, boolean, "defined">;
-  enablePtc: Schema<boolean, boolean, "defined">;
   disableOfficialTools: Schema<boolean, boolean, "defined">;
-  runtimeMode: Schema<"local-first" | "managed", "local-first" | "managed", "defined">;
-  allowLocalRuntimes: Schema<boolean, boolean, "defined">;
-  bashPath: Schema<string, string, "defined">;
-  pwshPath: Schema<string, string, "defined">;
-  fastctxPath: Schema<string, string, "defined">;
-  workerPath: Schema<string, string, "defined">;
-  promptPolicy: Schema<boolean, boolean, "defined">;
-  publishBashTool: Schema<boolean, boolean, "defined">;
-  enableShellTools: Schema<boolean, boolean, "defined">;
-  required: Schema<boolean, boolean, "defined">;
-  toolCallTimeoutMs: Schema<number, number, "defined">;
-  extraGuidance: Schema<string, string, "defined">;
 }>>>, NoInfer<Schemastery.ObjectT<NoInfer<{
-  enableShell: Schema<boolean, boolean, "defined">;
-  enableFile: Schema<boolean, boolean, "defined">;
-  enableBackground: Schema<boolean, boolean, "defined">;
-  enablePtc: Schema<boolean, boolean, "defined">;
   disableOfficialTools: Schema<boolean, boolean, "defined">;
-  runtimeMode: Schema<"local-first" | "managed", "local-first" | "managed", "defined">;
-  allowLocalRuntimes: Schema<boolean, boolean, "defined">;
-  bashPath: Schema<string, string, "defined">;
-  pwshPath: Schema<string, string, "defined">;
-  fastctxPath: Schema<string, string, "defined">;
-  workerPath: Schema<string, string, "defined">;
-  promptPolicy: Schema<boolean, boolean, "defined">;
-  publishBashTool: Schema<boolean, boolean, "defined">;
-  enableShellTools: Schema<boolean, boolean, "defined">;
-  required: Schema<boolean, boolean, "defined">;
-  toolCallTimeoutMs: Schema<number, number, "defined">;
-  extraGuidance: Schema<string, string, "defined">;
 }>>>, "volatile-defined">;
 export declare const inject: string[];
 export declare const name: string;

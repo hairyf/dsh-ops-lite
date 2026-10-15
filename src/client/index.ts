@@ -7,8 +7,7 @@ import type { OpsConfig } from '../types'
 import type { ConfigurationState } from './types'
 import { SettingsFormModel } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ConfigurationPage } from './configuration-page'
-import { CONFIGURATION_ENTRY_ID, CONFIGURATION_FIELDS, CONFIGURATION_KEY, CONFIGURATION_REGISTRANT, CONFIGURATION_SLOT } from './constants'
-import { FIELD_SPECS } from './fields'
+import { CONFIGURATION_ENTRY_ID, CONFIGURATION_FIELD, CONFIGURATION_KEY, CONFIGURATION_REGISTRANT, CONFIGURATION_SLOT, FIELD_SPECS } from './constants'
 import { mountConfigurationStyles } from './styles'
 
 export const inject = ['slots']
@@ -26,11 +25,13 @@ export function apply(ctx: Context): void {
       mutate: (ops, revision) => {
         const writes: Parameters<typeof configScope.mutate>[0][number][] = []
         for (const op of ops) {
+          if (op.path.length !== 1 || op.path[0] !== CONFIGURATION_FIELD)
+            return Promise.resolve(false)
           if (op.op === 'unset') {
-            writes.push({ op: 'unset', path: [...op.path] })
+            writes.push({ op: 'unset', path: [CONFIGURATION_FIELD] })
           }
-          else if (typeof op.value === 'string' || typeof op.value === 'boolean' || (typeof op.value === 'number' && Number.isFinite(op.value))) {
-            writes.push({ op: 'set', path: [...op.path], value: op.value })
+          else if (typeof op.value === 'boolean') {
+            writes.push({ op: 'set', path: [CONFIGURATION_FIELD], value: op.value })
           }
           else {
             return Promise.resolve(false)
@@ -44,7 +45,7 @@ export function apply(ctx: Context): void {
       yield () => model.dispose()
       const source = model.bind((): ConfigurationState => ({
         shell: model.shell(),
-        fields: Object.fromEntries(CONFIGURATION_FIELDS.map(field => [field, model.field(field)])) as ConfigurationState['fields'],
+        field: model.field(CONFIGURATION_FIELD),
       }))
       const formActions = model.actions()
       yield branch.slots.register({

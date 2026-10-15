@@ -5,6 +5,6 @@ export default antfu(
   {
     type: 'lib',
     pnpm: true,
-    ignores: ['dist'],
+    ignores: ['dist', 'vendor/fastctx/**/*.md'],
   },
 )

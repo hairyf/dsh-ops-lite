@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 import { defineConfig } from 'tsdown'
 import { StaleGuardRecorder } from 'tsdown-stale-guard'
+import { buildRuntime } from './build/runtime.mjs'
 
 export const dshExternal = [
   'react',
@@ -28,7 +29,8 @@ const common: UserConfig = {
 export default defineConfig([
   {
     ...common,
-    entry: { index: 'src/index.ts', cli: 'src/cli.ts' },
+    entry: { index: 'src/index.ts' },
+    hooks: { 'build:done': async () => { await buildRuntime() } },
     dts: true,
     sourcemap: false,
     clean: true,
