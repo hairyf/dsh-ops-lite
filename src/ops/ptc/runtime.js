@@ -7,7 +7,7 @@ import manifest from '../../../package.json' with { type: 'json' }
 import { PACKAGE_ROOT, runtimeRoot } from '../binary.js'
 
 export { PACKAGE_ROOT }
-export const PLATFORMS = Object.freeze(Object.keys(manifest.optionalDependencies).map(name => name.slice('dsh-ops-lite-'.length)))
+export const PLATFORMS = Object.freeze(Object.keys(manifest.optionalDependencies).map(name => name.slice('@dshopslite/'.length)))
 export function workerName(platform = process.platform) {
   return platform === 'win32' ? 'dsh-ops-worker.exe' : 'dsh-ops-worker'
 }

@@ -1,5 +1,5 @@
-import { C as PACKAGE_NAME } from "./workspace-preparation-BNP-8O20.js";
-import { t as applyComponent } from "./ops-CqTmmzIQ.js";
+import { C as PACKAGE_NAME } from "./workspace-preparation-CIAhEqtW.js";
+import { t as applyComponent } from "./ops-VI4sL4Kk.js";
 import process from "node:process";
 //#region src/shell.ts
 const name = `${PACKAGE_NAME}/shell`;

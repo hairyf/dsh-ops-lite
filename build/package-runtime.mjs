@@ -11,7 +11,7 @@ const target = `${process.platform}-${process.arch}`
 const directory = path.join(root, 'packages', target)
 const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'))
 const main = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-if (manifest.name !== `${main.name}-${target}` || manifest.version !== main.version
+if (manifest.name !== `@dshopslite/${target}` || manifest.version !== main.version
   || !manifest.os.includes(process.platform) || !manifest.cpu.includes(process.arch)) {
   throw new Error(`Platform package does not match the current build: ${target}`)
 }

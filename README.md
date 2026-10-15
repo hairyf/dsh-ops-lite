@@ -7,7 +7,7 @@
 [![coverage][coverage-src]][coverage-href]
 [![License][license-src]][license-href]
 
-> 注意，该项目还未完成，所以暂时不能安装
+安装 `dsh-ops-lite@^0.1.1` 时请保留包管理器的 optional dependencies；由 npm 自动选择当前平台运行时。
 
 基于 [T-Auto/dsh-ops](<https://github.com/T-Auto/dsh-ops>) fork，仅新增以下改动：
 
@@ -17,7 +17,7 @@
 
 徽章显示各服务的实际状态，不表示包已发布或覆盖率报告已上传。
 
-主包通过 `optionalDependencies` 引用 [Windows x64](<packages/win32-x64/package.json>)、[Linux x64（glibc）](<packages/linux-x64/package.json>)、[macOS arm64](<packages/darwin-arm64/package.json>) 运行时包；包管理器根据 `os` / `cpu` 自动安装匹配的包，不需要安装脚本、Rust 或 MSVC。Windows 包保留完整 Bash、PowerShell 7 和匹配 IPC；Unix 使用系统 Bash。缺少平台包或校验失败会明确报错，不静默退回其他运行时。
+主包通过 `optionalDependencies` 引用 `@dshopslite/*` 运行时包：[Windows x64](<packages/win32-x64/package.json>)、[Linux x64（glibc）](<packages/linux-x64/package.json>)、[macOS arm64](<packages/darwin-arm64/package.json>)；包管理器根据 `os` / `cpu` 自动安装匹配的包，不需要安装脚本、Rust 或 MSVC。Windows 包默认保留完整 Bash、PowerShell 7 和匹配 IPC；Unix 使用系统 Bash。缺少平台包或校验失败会明确报错，不静默退回其他运行时。
 
 `pnpm release` 统一版本并推送 tag，CI 验证三平台后先发布运行时包、再发布主包；首次发布需配置 npm 认证或 Trusted Publisher。
 

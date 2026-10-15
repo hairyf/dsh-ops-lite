@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -5,12 +6,14 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { loadBumpConfig, versionBump } from 'bumpp'
-import { expect, it } from 'vitest'
-import { syncNativeVersion } from '../bump.config.ts'
+import { expect, it, vi } from 'vitest'
+import bumpConfig, { syncNativeVersion } from '../bump.config.ts'
 import manifest from '../package.json' with { type: 'json' }
 import { executableName, resolveBinary, runtimeRoot } from '../src/ops/binary.js'
 import { resolveWorker, workerName } from '../src/ops/ptc/runtime.js'
 import { bundledShellPath } from '../src/ops/shells.js'
+
+vi.mock('node:child_process', () => ({ spawnSync: vi.fn() }))
 
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value))
@@ -79,17 +82,64 @@ it('loads the release configuration and bumps every package and native crate tog
   }
 })
 
-it('marks every Unix runtime executable for npm consumers', () => {
-  // `pnpm pack` writes 0644 unless the manifest lists the file here, and Unix
-  // consumers execute these directly; `test/e2e/run.mjs` asserts the packed mode.
-  for (const target of ['linux-x64', 'darwin-arm64']) {
-    const [platform] = target.split('-')
+it('executes release preparation with native or JavaScript pnpm and stops on command failures', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const temporary = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-release-hook-')))
+  try {
+    fs.mkdirSync(path.join(temporary, 'native'))
+    for (const file of ['package.json', 'native/Cargo.toml', 'native/Cargo.lock'])
+      fs.copyFileSync(path.join(root, file), path.join(temporary, file))
+    const context = { options: { cwd: temporary } }
+    vi.stubEnv('npm_execpath', undefined)
+    expect(() => bumpConfig.execute(context)).toThrow('Run releases with pnpm release.')
+    expect(spawnSync).not.toHaveBeenCalled()
+    for (const pnpm of ['C:/Program Files/pnpm/pnpm.exe', '/opt/pnpm/pnpm', '/opt/pnpm/pnpm.cjs', '/opt/pnpm/pnpm.mjs', '/opt/pnpm/pnpm.js']) {
+      vi.stubEnv('npm_execpath', pnpm)
+      vi.mocked(spawnSync).mockReset().mockReturnValue({ status: 0 })
+      bumpConfig.execute(context)
+      const isScript = /\.[cm]?js$/.test(pnpm)
+      expect(spawnSync.mock.calls).toEqual([
+        ['install', '--lockfile-only', '--ignore-scripts'],
+        ['run', 'build'],
+      ].map(args => [isScript ? process.execPath : pnpm, isScript ? [pnpm, ...args] : args, { cwd: temporary, stdio: 'inherit' }]))
+    }
+    const error = new Error('pnpm could not start')
+    for (const [result, expected] of [
+      [{ error }, error],
+      [{ status: 1 }, 'Release preparation failed (1).'],
+      [{ status: null, signal: 'SIGTERM' }, 'Release preparation failed (SIGTERM).'],
+    ]) {
+      vi.mocked(spawnSync).mockReset().mockReturnValue(result)
+      expect(() => bumpConfig.execute(context)).toThrow(expected)
+      expect(spawnSync).toHaveBeenCalledTimes(1)
+    }
+  }
+  finally {
+    vi.unstubAllEnvs()
+    vi.mocked(spawnSync).mockReset()
+    fs.rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+it('declares exact scoped platform dependencies and executable Unix runtimes', () => {
+  const targets = ['darwin-arm64', 'linux-x64', 'win32-x64']
+  expect(manifest.optionalDependencies).toEqual(Object.fromEntries(targets.map(target => [`@dshopslite/${target}`, 'workspace:*'])))
+  for (const target of targets) {
+    const [platform, arch] = target.split('-')
     const file = fileURLToPath(new URL(`../packages/${target}/package.json`, import.meta.url))
-    const publishConfig = JSON.parse(fs.readFileSync(file, 'utf8')).publishConfig
-    expect(publishConfig.executableFiles).toEqual([
-      `./runtime/${target}/${workerName(platform)}`,
-      `./runtime/${target}/${executableName(platform)}`,
-    ])
+    const metadata = JSON.parse(fs.readFileSync(file, 'utf8'))
+    expect(metadata).toMatchObject({ name: `@dshopslite/${target}`, version: manifest.version, os: [platform], cpu: [arch] })
+    if (platform === 'win32') {
+      expect(metadata.files).toEqual(['licenses', 'runtime', 'vendor'])
+      expect(metadata.license).toContain('GPL-2.0-only')
+    }
+    // Unix consumers execute these directly; the E2E checks their packed modes.
+    else {
+      expect(metadata.publishConfig.executableFiles).toEqual([
+        `./runtime/${target}/${workerName(platform)}`,
+        `./runtime/${target}/${executableName(platform)}`,
+      ])
+    }
   }
 })
 
@@ -114,7 +164,7 @@ it('resolves exact platform packages without bypassing metadata, provenance or e
       const [platform, arch] = target.split('-')
       const installation = path.join(temporary, target)
       const packageRoot = path.join(installation, 'dist')
-      const name = `dsh-ops-lite-${target}`
+      const name = `@dshopslite/${target}`
       const directory = path.join(installation, 'node_modules', name)
       fs.mkdirSync(directory, { recursive: true })
       fs.mkdirSync(packageRoot)

@@ -1,5 +1,5 @@
-import { c as FILE_TOOLS, h as PACKAGE_ROOT, o as BACKGROUND_TOOLS, p as publicToolName, u as SHELL_TOOLS } from "./workspace-preparation-BNP-8O20.js";
-import { n as resolveShells } from "./ops-CqTmmzIQ.js";
+import { c as FILE_TOOLS, h as PACKAGE_ROOT, o as BACKGROUND_TOOLS, p as publicToolName, u as SHELL_TOOLS } from "./workspace-preparation-CIAhEqtW.js";
+import { n as resolveShells } from "./ops-VI4sL4Kk.js";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import path from "node:path";

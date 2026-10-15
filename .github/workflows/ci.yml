@@ -87,14 +87,14 @@ jobs:
         run: |
           node build/package-runtime.mjs
           OUT="$(node -p 'require("node:path").resolve(".cache/package")')"
-          pnpm --filter "dsh-ops-lite-$TARGET" --config.ignore-scripts=true pack --pack-destination "$OUT"
+          pnpm --filter "@dshopslite/$TARGET" --config.ignore-scripts=true pack --pack-destination "$OUT"
       - name: Pack the portable main package once without rerunning prepack
         if: runner.os == 'Linux'
         run: pnpm --config.ignore-scripts=true pack --pack-destination .cache/package
       - uses: actions/upload-artifact@v4
         with:
           name: platform-package-${{ matrix.target }}
-          path: .cache/package/dsh-ops-lite-${{ matrix.target }}-*.tgz
+          path: .cache/package/dshopslite-${{ matrix.target }}-*.tgz
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
@@ -155,7 +155,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           export DSH_E2E_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dsh-ops-lite-"+require("./package.json").version+".tgz")')"
-          export DSH_E2E_PLATFORM_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dsh-ops-lite-"+process.env.TARGET+"-"+require("./package.json").version+".tgz")')"
+          export DSH_E2E_PLATFORM_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dshopslite-"+process.env.TARGET+"-"+require("./package.json").version+".tgz")')"
           pnpm run test:e2e
       - name: Upload installation evidence, browser traces and real host logs
         if: always()

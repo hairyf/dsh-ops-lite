@@ -365,13 +365,13 @@ importers:
         specifier: catalog:testing
         version: 4.1.10(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.1)(yaml@2.9.0))
     optionalDependencies:
-      dsh-ops-lite-darwin-arm64:
+      '@dshopslite/darwin-arm64':
         specifier: workspace:*
         version: link:packages/darwin-arm64
-      dsh-ops-lite-linux-x64:
+      '@dshopslite/linux-x64':
         specifier: workspace:*
         version: link:packages/linux-x64
-      dsh-ops-lite-win32-x64:
+      '@dshopslite/win32-x64':
         specifier: workspace:*
         version: link:packages/win32-x64
 

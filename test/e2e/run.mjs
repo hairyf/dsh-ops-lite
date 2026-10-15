@@ -88,16 +88,16 @@ async function main() {
       assert(pnpm && /pnpm/i.test(pnpm), 'Use pnpm run test:e2e after building/staging the platform package, or supply both tarball paths.')
       const packages = path.join(root, 'packages')
       await mkdir(packages)
-      for (const filter of [[], ['--filter', `dsh-ops-lite-${target}`]]) {
+      for (const filter of [[], ['--filter', `@dshopslite/${target}`]]) {
         const args = [...filter, '--config.ignore-scripts=true', 'pack', '--pack-destination', packages]
         await run(/\.[cm]?js$/.test(pnpm) ? [pnpm, ...args] : args, { executable: /\.[cm]?js$/.test(pnpm) ? process.execPath : pnpm })
       }
       const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
       tarball = path.join(packages, `dsh-ops-lite-${manifest.version}.tgz`)
-      platformTarball = path.join(packages, `dsh-ops-lite-${target}-${manifest.version}.tgz`)
+      platformTarball = path.join(packages, `dshopslite-${target}-${manifest.version}.tgz`)
     }
     const inspected = []
-    for (const [file, name] of [[tarball, 'dsh-ops-lite'], [platformTarball, `dsh-ops-lite-${target}`]]) {
+    for (const [file, name] of [[tarball, 'dsh-ops-lite'], [platformTarball, `@dshopslite/${target}`]]) {
       assert(path.isAbsolute(file) && file.endsWith('.tgz'), 'Require explicit absolute npm tarball paths.')
       await access(file)
       const [packed] = JSON.parse(await run([npmCli, 'pack', file, '--dry-run', '--ignore-scripts', '--json'], { capture: true }))
@@ -107,7 +107,7 @@ async function main() {
       const manifest = JSON.parse(await run(['-xOf', file, 'package/package.json'], { executable: tar, capture: true }))
       assert.equal(manifest.name, name)
       assert.equal(manifest.version, packed.version)
-      if (process.platform !== 'win32' && name === `dsh-ops-lite-${target}`) {
+      if (process.platform !== 'win32' && name === `@dshopslite/${target}`) {
         const listing = (await run(['-tvf', file], { executable: tar, capture: true })).split('\n')
         for (const executable of ['dsh-ops-worker', 'fastctx']) {
           const entry = listing.find(line => line.endsWith(` package/runtime/${target}/${executable}`))
@@ -123,7 +123,7 @@ async function main() {
     assert.equal(platformPacked.version, packed.version)
     assert.deepEqual(platformPacked.manifest.os, [process.platform])
     assert.deepEqual(platformPacked.manifest.cpu, [process.arch])
-    assert.deepEqual(packed.manifest.optionalDependencies, Object.fromEntries(targets.map(target => [`dsh-ops-lite-${target}`, packed.version])))
+    assert.deepEqual(packed.manifest.optionalDependencies, Object.fromEntries(targets.map(target => [`@dshopslite/${target}`, packed.version])))
     const files = packed.files.map(file => file.path)
     assert(!files.some(file => /^(?:build\/|dist\/(?:runtime|vendor|licenses)(?:\/|$)|\.cache\/|node_modules\/|native\/|vendor\/|src\/|bin\/)|\/(?:target|node_modules)\//.test(file) || file === 'runtime-manifest.json'), 'The main package must contain no native payloads, installer, source-build inputs or caches.')
     for (const required of ['dist/index.js', 'dist/client.js', 'dist/shell.js', 'dist/background.js', 'dist/ptc.js', 'dist/prepare-workspace.ps1', 'cordis.patch.yml'])
@@ -163,12 +163,12 @@ async function main() {
     assert.equal(await realpath(plugin), plugin, 'The tested plugin must be installed, not a checkout link.')
     const installed = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8'))
     assert.deepEqual(installed, packed.manifest, 'Install the exact inspected main tarball.')
-    const platformRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`dsh-ops-lite-${target}/package.json`))
-    assert.equal(await realpath(platformRoot), path.join(installation, `node_modules/dsh-ops-lite-${target}`), 'Execute assets directly from the installed platform package.')
+    const platformRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`@dshopslite/${target}/package.json`))
+    assert.equal(await realpath(platformRoot), path.join(installation, `node_modules/@dshopslite/${target}`), 'Execute assets directly from the installed platform package.')
     assert.deepEqual(JSON.parse(await readFile(path.join(platformRoot, 'package.json'), 'utf8')), platformPacked.manifest)
     await assert.rejects(access(path.join(plugin, 'dist/runtime')), { code: 'ENOENT' }, 'Do not copy platform payloads into the main package.')
     for (const other of targets.filter(other => other !== target))
-      await assert.rejects(access(path.join(installation, `node_modules/dsh-ops-lite-${other}`)), { code: 'ENOENT' }, 'npm must not install another OS/CPU runtime package.')
+      await assert.rejects(access(path.join(installation, `node_modules/@dshopslite/${other}`)), { code: 'ENOENT' }, 'npm must not install another OS/CPU runtime package.')
     const evidence = { tarball: packed.filename, tarballSha256: packed.tarballSha256, packageBytes: packed.size, platformTarball: platformPacked.filename, platformTarballSha256: platformPacked.tarballSha256, platformPackageBytes: platformPacked.size, target, version: installed.version, compilerToolsAvailable: false, npmOsCpuFilteringVerified: true, platformRoot, runtimes: [] }
     for (const [name, receiptName, binaryVersion] of [['dsh-ops-worker', 'provenance.json', installed.version], ['fastctx', 'fastctx.provenance.json', '0.2.6']]) {
       const executable = `${name}${process.platform === 'win32' ? '.exe' : ''}`

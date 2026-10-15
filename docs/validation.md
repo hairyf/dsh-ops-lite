@@ -31,8 +31,8 @@ pnpm build
 pnpm --config.ignore-scripts=true pack --pack-destination .cache
 node scripts/measure-install.mjs dsh-ops@0.3.0
 node build/package-runtime.mjs
-pnpm --filter dsh-ops-lite-win32-x64 --config.ignore-scripts=true pack --pack-destination .cache
-node scripts/measure-install.mjs .cache/dsh-ops-lite-0.1.0.tgz .cache/dsh-ops-lite-win32-x64-0.1.0.tgz
+pnpm --filter @dshopslite/win32-x64 --config.ignore-scripts=true pack --pack-destination .cache
+node scripts/measure-install.mjs .cache/dsh-ops-lite-<version>.tgz .cache/dshopslite-win32-x64-<version>.tgz
 ```
 
 [测量脚本](<../scripts/measure-install.mjs>) 只创建和删除自己的临时目录；不安装到用户 Harness。Windows-only 上游 payload 的此项比较不能外推为 Unix 数据。
@@ -59,4 +59,4 @@ npm 仅选择当前平台，不安装其他系统的运行时，无下载器或�
 
 [E2E runner](<../test/e2e/run.mjs>) 独立安装固定版本 `@deepseek-ai/dsh@0.2.1-alpha.1`，校验实际路径和版本，隔离 profile/home/workspace，随机端口，不回退到既有 Harness，不修改 core renderer，不调用 LLM。这不是 Tauri WebDriver L3。
 
-未发布 npm、未创建 release tag，未向用户当前 Harness 安装插件。
+以上测量记录均为发版前构建快照；包名调整后的归档文件名为 `dshopslite-<target>-<version>.tgz`。实际 npm 发布状态以注册表和对应 Release 工作流为准；没有向用户当前 Harness 安装插件。

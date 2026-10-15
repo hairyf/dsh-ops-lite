@@ -95,9 +95,9 @@
     "hooks": "Set up development git hooks"
   },
   "optionalDependencies": {
-    "dsh-ops-lite-darwin-arm64": "workspace:*",
-    "dsh-ops-lite-linux-x64": "workspace:*",
-    "dsh-ops-lite-win32-x64": "workspace:*"
+    "@dshopslite/darwin-arm64": "workspace:*",
+    "@dshopslite/linux-x64": "workspace:*",
+    "@dshopslite/win32-x64": "workspace:*"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:cli",

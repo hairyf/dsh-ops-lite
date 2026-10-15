@@ -79,8 +79,8 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   assert.equal(manifest.name, 'dsh-ops-lite')
   assert.equal(manifest.scripts?.install, undefined, 'The main package must not compile or download runtimes during installation.')
   const target = `${process.platform}-${process.arch}`
-  const runtimeRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`dsh-ops-lite-${target}/package.json`))
-  assert.equal(await realpath(runtimeRoot), path.join(await realpath(installation), `node_modules/dsh-ops-lite-${target}`))
+  const runtimeRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`@dshopslite/${target}/package.json`))
+  assert.equal(await realpath(runtimeRoot), path.join(await realpath(installation), `node_modules/@dshopslite/${target}`))
   await access(path.join(plugin, 'dist/index.js'))
   await access(path.join(runtimeRoot, `runtime/${target}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
   const scratch = await mkdtemp(path.join(root, 'host-'))

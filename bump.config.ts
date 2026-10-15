@@ -23,11 +23,13 @@ export default defineConfig({
   files: ['package.json', 'packages/*/package.json'],
   all: true,
   execute({ options: { cwd } }) {
-    if (!process.env.npm_execpath)
+    const pnpm = process.env.npm_execpath
+    if (!pnpm)
       throw new Error('Run releases with pnpm release.')
     syncNativeVersion(cwd)
+    const isScript = /\.[cm]?js$/.test(pnpm)
     for (const args of [['install', '--lockfile-only', '--ignore-scripts'], ['run', 'build']]) {
-      const result = spawnSync(process.execPath, [process.env.npm_execpath, ...args], { cwd, stdio: 'inherit' })
+      const result = spawnSync(isScript ? process.execPath : pnpm, isScript ? [pnpm, ...args] : args, { cwd, stdio: 'inherit' })
       if (result.error)
         throw result.error
       if (result.status !== 0)

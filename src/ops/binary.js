@@ -14,7 +14,7 @@ export const BINARY_ENV = 'DSH_OPS_FASTCTX_BIN'
 
 export function runtimeRoot({ packageRoot = PACKAGE_ROOT, platform = process.platform, arch = process.arch } = {}) {
   const target = `${platform}-${arch}`
-  const name = `dsh-ops-lite-${target}`
+  const name = `@dshopslite/${target}`
   if (!Object.hasOwn(manifest.optionalDependencies, name))
     throw new Error(`Unsupported dsh-ops-lite runtime target ${target}. No download or compilation fallback is used.`)
   if (fs.existsSync(path.join(packageRoot, 'runtime', target, 'provenance.json')))

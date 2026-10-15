@@ -33,9 +33,9 @@ const DEFAULT_CONFIG = { disableOfficialTools: true };
 //#region package.json
 var version = "0.1.0";
 var optionalDependencies = {
-	"dsh-ops-lite-darwin-arm64": "workspace:*",
-	"dsh-ops-lite-linux-x64": "workspace:*",
-	"dsh-ops-lite-win32-x64": "workspace:*"
+	"@dshopslite/darwin-arm64": "workspace:*",
+	"@dshopslite/linux-x64": "workspace:*",
+	"@dshopslite/win32-x64": "workspace:*"
 };
 //#endregion
 //#region src/ops/binary.js
@@ -45,7 +45,7 @@ const PACKAGE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BINARY_ENV = "DSH_OPS_FASTCTX_BIN";
 function runtimeRoot({ packageRoot = PACKAGE_ROOT, platform = process.platform, arch = process.arch } = {}) {
 	const target = `${platform}-${arch}`;
-	const name = `dsh-ops-lite-${target}`;
+	const name = `@dshopslite/${target}`;
 	if (!Object.hasOwn(optionalDependencies, name)) throw new Error(`Unsupported dsh-ops-lite runtime target ${target}. No download or compilation fallback is used.`);
 	if (fs.existsSync(path.join(packageRoot, "runtime", target, "provenance.json"))) return packageRoot;
 	let file;
@@ -246,7 +246,7 @@ function denied(policy, operation, required, message) {
 //#endregion
 //#region src/ops/ptc/runtime.js
 /** Runtime discovery is installation-relative; explicit selections never silently fall back. */
-const PLATFORMS = Object.freeze(Object.keys(optionalDependencies).map((name) => name.slice(13)));
+const PLATFORMS = Object.freeze(Object.keys(optionalDependencies).map((name) => name.slice(12)));
 function workerName(platform = process.platform) {
 	return platform === "win32" ? "dsh-ops-worker.exe" : "dsh-ops-worker";
 }

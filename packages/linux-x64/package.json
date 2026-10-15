@@ -1,5 +1,5 @@
 {
-  "name": "dsh-ops-lite-linux-x64",
+  "name": "@dshopslite/linux-x64",
   "version": "0.1.0",
   "description": "Linux x64 native runtime for dsh-ops-lite (glibc)",
   "license": "MIT AND Apache-2.0",
