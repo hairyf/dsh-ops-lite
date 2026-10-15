@@ -315,8 +315,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = parent.remove_file(&temporary);
         return Err(Failure::new("ACCESS_DENIED", format!("Atomic replacement publish: {error}")));
     }
+    // cap-std directory handles may use O_PATH; reopen for fsync, not a duplicate.
     #[cfg(unix)]
-    parent.try_clone()?.into_std_file().sync_all()?;
+    parent.open(".")?.sync_all()?;
     Ok(())
 }
 

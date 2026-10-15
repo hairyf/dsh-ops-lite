@@ -11,7 +11,7 @@ import { prepareWorkspace } from '../src/ops/workspace-preparation.js'
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }))
 
 it('lets Windows PowerShell resolve its own modules instead of inheriting PowerShell 7 modules', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-workspace-'))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-workspace-')))
   const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
   vi.stubEnv('pSmOdUlEpAtH', 'incompatible-pwsh7-modules')
   vi.mocked(spawn).mockImplementation(() => {

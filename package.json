@@ -17,6 +17,18 @@
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
+    "./shell": "./dist/shell.js",
+    "./file": "./dist/index.js",
+    "./background": "./dist/background.js",
+    "./ptc": "./dist/ptc.js",
+    "./shell/locale/*.json": "./dist/components/shell/locale/*.json",
+    "./file/locale/*.json": "./dist/components/file/locale/*.json",
+    "./background/locale/*.json": "./dist/components/background/locale/*.json",
+    "./ptc/locale/*.json": "./dist/components/ptc/locale/*.json",
+    "./shell/icon": "./dist/components/icon.png",
+    "./file/icon": "./dist/components/icon.png",
+    "./background/icon": "./dist/components/icon.png",
+    "./ptc/icon": "./dist/components/icon.png",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",

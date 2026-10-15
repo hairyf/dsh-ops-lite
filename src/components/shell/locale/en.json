@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh-ops-bash & powershell 7",
+    "description": "Prefer Bash for general commands and provide PowerShell 7 for Windows-native functionality."
+  }
+}

@@ -1,16 +1,11 @@
-import type { SettingsFieldState, SettingsFormActions, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { ComposedProps, HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ComposedProps } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PACKAGE_NAME } from '../constants'
+import type { OpsConfig } from '../types'
 import type { CONFIGURATION_SLOT } from './constants'
 
-export interface ConfigurationState {
-  shell: SettingsFormShell
-  field: SettingsFieldState
-}
-
 export interface ConfigurationInject {
-  hooks: { configuration: HostObservable<ConfigurationState> }
-  formActions: SettingsFormActions
+  configScope: ConfigForm<OpsConfig>
 }
 
 export type ConfigurationProps = ComposedProps<

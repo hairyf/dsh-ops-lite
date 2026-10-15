@@ -3,13 +3,10 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { OpsConfigRef } from './types'
-import process from 'node:process'
+import { renderToolsSdk, renderToolsSdkPy } from '@deepseek-ai/dsh-tools'
 import { Config } from './config'
-import { OFFICIAL_TOOLS, PACKAGE_NAME } from './constants'
-import { resolveConfig } from './ops/config.js'
+import { OFFICIAL_TOOL_SECTIONS, OFFICIAL_TOOLS, PACKAGE_NAME } from './constants'
 import { applyComponent } from './ops/index.js'
-import { apply as applyPtc } from './ops/ptc/index.js'
-import { resolveShells } from './ops/shells.js'
 
 export { Config }
 export const name = PACKAGE_NAME
@@ -17,7 +14,37 @@ export const inject = ['tools', 'sandboxPolicy', 'subprocess']
 
 function disableOfficialTools(ctx: Context): void {
   const denied = new Set<string>(OFFICIAL_TOOLS)
+  const hiddenSections = new Set<string>(OFFICIAL_TOOL_SECTIONS)
   const lifts = new Map<Agent, Map<string, () => void>>()
+  ctx.inject(['systemPrompt'], (branch) => {
+    branch.on('system-prompt/assemble', async (_assembly, context, next) => {
+      const assembly = await next()
+      if (!context.agent)
+        return assembly
+      let sdk: string | undefined
+      if (assembly.sections.some(section => section.name === 'tools:sdk' && section.text.length > 0)) {
+        const schemas: Parameters<typeof renderToolsSdk>[0] = []
+        for (const schema of ctx.tools.schemas(context.agent)) {
+          const definition = ctx.tools.get(schema.name, context.agent)
+          if (definition && schema.name !== 'run_code' && !denied.has(schema.name))
+            schemas.push({ ...schema, output: definition.output.schema })
+        }
+        const language = ctx.get('ptcRuntime')?.language
+        if (language === 'typescript')
+          sdk = renderToolsSdk(schemas)
+        else if (language === 'python')
+          sdk = renderToolsSdkPy(schemas)
+        else
+          throw new Error(`Cannot filter the official tools from PTC SDK language ${String(language)}`)
+      }
+      return {
+        ...assembly,
+        tools: assembly.tools.filter(tool => !denied.has(tool.name)),
+        sections: assembly.sections.filter(section => !hiddenSections.has(section.name))
+          .map(section => section.name === 'tools:sdk' && sdk !== undefined ? { ...section, text: sdk, interpolate: false } : section),
+      }
+    })
+  })
   let updating = false
   const refresh = (): void => {
     if (updating)
@@ -68,22 +95,9 @@ function disableOfficialTools(ctx: Context): void {
   refresh()
 }
 
-/** Mount the complete fork; missing shipped runtimes are an installation error, not a feature toggle. */
-function mount(ctx: Context): void {
-  const common = { required: true, allowSystemShellFallback: process.platform !== 'win32' }
-  const shells = resolveShells(resolveConfig(common))
-  if (!shells.bash.available)
-    throw new Error(`dsh-ops-next: Bash unavailable: ${shells.bash.detail}`)
-  const config = { ...common, bashPath: shells.bash.file }
-  applyComponent(ctx, config, 'shell')
-  applyComponent(ctx, config, 'file')
-  applyComponent(ctx, config, 'background')
-  applyPtc(ctx, { required: true })
-}
-
-/** Changing the one optional policy must not unload the working Ops runtimes. */
+/** The bundle mounts each capability from its independently owned loader row. */
 export async function apply(ctx: Context, config: OpsConfigRef): Promise<void> {
-  mount(ctx)
+  applyComponent(ctx, { required: true }, 'file')
   let current: Fiber | undefined
   let stopped = false
   let chain = Promise.resolve()

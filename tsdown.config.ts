@@ -29,7 +29,8 @@ const common: UserConfig = {
 export default defineConfig([
   {
     ...common,
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', shell: 'src/shell.ts', background: 'src/background.ts', ptc: 'src/ptc.ts' },
+    copy: [{ from: 'src/components', to: 'dist' }],
     hooks: { 'build:done': async () => { await buildRuntime() } },
     dts: true,
     sourcemap: false,

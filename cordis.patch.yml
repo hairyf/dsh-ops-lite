@@ -1,3 +1,11 @@
 - insert:
-    - id: dsh-ops-next
-      name: dsh-ops-next
+    - id: dsh-ops-next-shell
+      name: dsh-ops-next/shell
+    - id: dsh-ops-next-file
+      name: dsh-ops-next/file
+    - id: dsh-ops-next-background
+      name: dsh-ops-next/background
+      disabled: true
+    - id: dsh-ops-next-ptc
+      name: dsh-ops-next/ptc
+      disabled: true

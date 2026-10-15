@@ -144,9 +144,9 @@ impl Store {
         drop(f);
         self.dir
             .rename(&temporary, &self.dir, format!("{id}.{generation:06}.json"))?;
-        // Persist directory entries where the platform supports directory fsync.
+        // Reopen the same directory: a duplicated O_PATH handle cannot be fsynced.
         #[cfg(unix)]
-        self.dir.try_clone()?.into_std_file().sync_all()?;
+        self.dir.open(".")?.sync_all()?;
         Ok(())
     }
     pub fn release(&self, id: &str) -> Result<()> {
@@ -175,4 +175,32 @@ pub fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Store;
+    use cap_std::{ambient_authority, fs::Dir};
+    use serde_json::{Value, json};
+    use std::fs;
+
+    #[test]
+    fn save_reads_committed_generations() {
+        let directory = std::env::temp_dir().join(format!("dsh-ops-store-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let directory = fs::canonicalize(directory).unwrap();
+        let result: crate::contract::Result<()> = (|| {
+            let root = Dir::open_ambient_dir(&directory, ambient_authority())?;
+            let store = Store::open(&root, false)?;
+            let id = format!("r-{}", uuid::Uuid::new_v4());
+            store.save(&id, &json!({"generation": 0}))?;
+            assert_eq!(store.read::<Value>(&id)?, json!({"generation": 0}));
+            store.save(&id, &json!({"generation": 1}))?;
+            assert_eq!(store.latest(&id)?.1, 1);
+            assert_eq!(store.read::<Value>(&id)?, json!({"generation": 1}));
+            Ok(())
+        })();
+        fs::remove_dir_all(directory).unwrap();
+        result.unwrap();
+    }
 }

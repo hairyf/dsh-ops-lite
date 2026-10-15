@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -121,8 +122,20 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   ].join('\n'))
   await writeFile(path.join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\nnodeLinker: hoisted\nautoInstallPeers: false\n')
   await writeFile(path.join(workspace, 'native.txt'), 'before-e2e\n')
-  const env = { ...process.env, DSH_HOME: home }
-  const child = spawn(process.execPath, [cli, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], {
+  // FastCtx's supported idle override prevents its detached test-only daemon holding copied assets open after teardown.
+  const env = { ...process.env, DSH_HOME: home, FASTCTX_TEST_RUNTIME_IDLE_MS: '500' }
+  // Profile reconciliation may recreate webServer; keep its OS-selected port stable across reloads.
+  const reservation = createServer()
+  const port = await new Promise<number>((resolve, reject) => {
+    reservation.once('error', reject)
+    reservation.listen(0, '127.0.0.1', () => {
+      const address = reservation.address()
+      assert(address && typeof address === 'object')
+      reservation.close(error => error ? reject(error) : resolve(address.port))
+    })
+  })
+  assert(![3080, 3081].includes(port), 'Never bind a user GUI or development port.')
+  const child = spawn(process.execPath, [cli, 'web', '--host', '127.0.0.1', '--port', String(port), '--no-open'], {
     cwd: profile,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -1,29 +1,123 @@
-import { describe, expect, it } from 'vitest'
+import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ReactElement } from 'react'
+import type { OpsConfig } from '../types'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Config } from '../config'
-import { DEFAULT_CONFIG, OFFICIAL_TOOLS } from '../constants'
-import { CONFIGURATION_FIELD, FIELD_SPECS } from './constants'
+import { CONFIG_ROW_ID, DEFAULT_CONFIG, OFFICIAL_TOOLS } from '../constants'
+import { ConfigurationPage } from './configuration-page'
+import { CONFIGURATION_ENTRY_ID, CONFIGURATION_FIELD, CONFIGURATION_MESSAGES, TOGGLE_DESCRIPTION } from './constants'
+
+const hooks = vi.hoisted(() => ({
+  values: [] as boolean[],
+  refs: [] as { current: unknown }[],
+  stateIndex: 0,
+  refIndex: 0,
+}))
+vi.mock('react', () => ({
+  useEffect: () => {},
+  useRef: (value: unknown) => hooks.refs[hooks.refIndex++] ??= { current: value },
+  useState: (initial: boolean) => {
+    const index = hooks.stateIndex++
+    hooks.values[index] ??= initial
+    return [hooks.values[index], (value: boolean) => {
+      hooks.values[index] = value
+    }]
+  },
+  useSyncExternalStore: (_subscribe: unknown, read: () => unknown) => read(),
+}))
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({ Switch: () => null }))
+
+function render(scope: ConfigForm<OpsConfig>) {
+  hooks.stateIndex = 0
+  hooks.refIndex = 0
+  const page = ConfigurationPage({
+    view: 'page',
+    configScope: scope,
+    renderSlot: {},
+    renderFactorySlot: () => { throw new Error('Settings page must not render factories.') },
+    usePanelInfo: () => { throw new Error('Settings page must not depend on panel state.') },
+  })
+  const children = (page.props as { children: ReactElement[] }).children
+  const toggle = (children[0].props as { children: ReactElement[] }).children[1]
+  return {
+    toggle: toggle.props as { checked: boolean, disabled: boolean, onChange: (value: boolean) => Promise<void> },
+    error: children[2],
+  }
+}
+
+beforeEach(() => {
+  hooks.values = []
+  hooks.refs = []
+})
 
 describe('configuration contract', () => {
-  it('exposes only the default-off official tool switch', () => {
-    expect(DEFAULT_CONFIG).toEqual({ disableOfficialTools: false })
+  it('defaults to enabled in the file-row namespace and preserves explicit false', () => {
+    expect(DEFAULT_CONFIG).toEqual({ disableOfficialTools: true })
     expect(Config().get()).toEqual(DEFAULT_CONFIG)
-    expect(FIELD_SPECS.map(spec => spec.field)).toEqual([CONFIGURATION_FIELD])
-    expect(FIELD_SPECS[0].format(undefined)).toBe('false')
+    expect(CONFIG_ROW_ID).toBe('dsh-ops-next-file')
+    expect(CONFIGURATION_ENTRY_ID).toBe(CONFIG_ROW_ID)
+    expect(TOGGLE_DESCRIPTION).toBe('开启后禁用官方基础文件与 Shell 工具，保留 read_image，不改变权限或沙箱。')
     expect(OFFICIAL_TOOLS).not.toContain('read_image')
     expect(OFFICIAL_TOOLS.every(name => !name.startsWith('ops_'))).toBe(true)
-    for (const value of [true, false]) {
-      expect(FIELD_SPECS[0].format(value)).toBe(String(value))
-      expect(FIELD_SPECS[0].parse(String(value))).toEqual({ kind: 'set', value })
+    for (const value of [true, false])
       expect(Config({ disableOfficialTools: value }).get()).toEqual({ disableOfficialTools: value })
-    }
   })
 
-  it('rejects non-boolean values at the draft and Host schema boundaries', () => {
-    for (const text of ['', 'yes', '1', '0', 'TRUE', ' false ', 'null'])
-      expect(FIELD_SPECS[0].parse(text)).toBeUndefined()
+  it('rejects non-booleans at the Host schema boundary', () => {
     for (const value of ['true', 'false', 1, 0, [], {}])
       expect(() => Config(JSON.parse(JSON.stringify({ disableOfficialTools: value })))).toThrow()
-    // Schemastery treats null as an absent value; it must resolve to the safe default.
+    // Schemastery treats null as absent and resolves the same default as the UI.
     expect(Config(JSON.parse('{"disableOfficialTools":null}')).get()).toEqual(DEFAULT_CONFIG)
+  })
+
+  it('autosaves one revision-fenced change, never showing a refused value as saved', async () => {
+    let snapshot: ConfigFormSnapshot<OpsConfig> = {
+      status: 'ready',
+      value: undefined,
+      base: {},
+      user: {},
+      revision: 7,
+      writable: true,
+      mode: 'host',
+    }
+    const pending = Promise.withResolvers<boolean>()
+    const scope: ConfigForm<OpsConfig> = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      mutate: vi.fn(() => pending.promise),
+      set: vi.fn(async () => false),
+      unset: vi.fn(async () => false),
+    }
+    const initial = render(scope)
+    expect(initial.toggle.checked).toBe(true)
+    const saving = initial.toggle.onChange(false)
+    expect(scope.mutate).toHaveBeenCalledWith([{ op: 'set', path: [CONFIGURATION_FIELD], value: false }], 7)
+    expect(render(scope).toggle).toMatchObject({ checked: true, disabled: true })
+    await initial.toggle.onChange(true)
+    expect(scope.mutate).toHaveBeenCalledTimes(1)
+    snapshot = { ...snapshot, value: { disableOfficialTools: false }, revision: 8 }
+    pending.resolve(true)
+    await saving
+    expect(render(scope).toggle).toMatchObject({ checked: false, disabled: false })
+
+    vi.mocked(scope.mutate).mockResolvedValue(false)
+    await render(scope).toggle.onChange(true)
+    expect(scope.mutate).toHaveBeenLastCalledWith([{ op: 'set', path: [CONFIGURATION_FIELD], value: true }], 8)
+    expect(render(scope).toggle).toMatchObject({ checked: false, disabled: false })
+    expect(render(scope).error).toMatchObject({ props: { role: 'alert', children: CONFIGURATION_MESSAGES.saveFailed } })
+
+    vi.mocked(scope.mutate).mockRejectedValue(new Error('transport failed'))
+    await render(scope).toggle.onChange(true)
+    expect(render(scope).toggle.checked).toBe(false)
+    expect(render(scope).error).toMatchObject({ props: { role: 'alert', children: CONFIGURATION_MESSAGES.saveFailed } })
+    for (const blocked of [{ writable: false }, { mode: 'memory' as const }, { status: 'unavailable' as const }]) {
+      const prior = snapshot
+      snapshot = { ...snapshot, ...blocked }
+      const attempts = vi.mocked(scope.mutate).mock.calls.length
+      expect(render(scope).toggle.disabled).toBe(true)
+      await render(scope).toggle.onChange(true)
+      expect(scope.mutate).toHaveBeenCalledTimes(attempts)
+      snapshot = prior
+    }
   })
 })

@@ -1,4 +1,5 @@
 /** dsh-ops host half. Own registrations only; no @deepseek-ai value imports. */
+import process from 'node:process'
 import { PACKAGE_ROOT, probeBinary, resolveBinary } from './binary.js'
 import { resolveConfig } from './config.js'
 import { FILE_TOOLS } from './file/contract.js'
@@ -139,6 +140,8 @@ export function applyComponent(root, rawConfig, component) {
       })()
     : undefined
   const shells = component === 'shell' ? resolveShells(config) : undefined
+  if (shells && config.required && (!shells.bash.available || (process.platform === 'win32' && !shells.pwsh.available)))
+    throw new Error(`dsh-ops-next: required shell runtime unavailable: ${!shells.bash.available ? shells.bash.detail : shells.pwsh.detail}`)
   const owned = component === 'shell'
     ? [BASH_TOOL, 'pwsh']
     : component === 'file' ? FILE_TOOLS.map(publicToolName) : BACKGROUND_TOOLS.map(publicToolName)
