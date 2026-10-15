@@ -21,14 +21,14 @@ const common: UserConfig = {
   format: 'esm',
   outExtensions: () => ({ js: '.js' }),
   publint: true,
-  external: dshExternal,
-  plugins: [StaleGuardRecorder],
+  deps: { neverBundle: dshExternal },
+  plugins: [StaleGuardRecorder()],
 }
 
 export default defineConfig([
   {
     ...common,
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', cli: 'src/cli.ts' },
     dts: true,
     sourcemap: false,
     clean: true,

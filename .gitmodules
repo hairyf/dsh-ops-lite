@@ -1,0 +1,3 @@
+[submodule "source/dsh-ops"]
+	path = source/dsh-ops
+	url = https://github.com/T-Auto/dsh-ops.git

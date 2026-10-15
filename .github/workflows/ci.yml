@@ -1,19 +1,97 @@
-name: Unit Test
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  unit-test:
-    uses: sxzz/workflows/.github/workflows/unit-test.yml@main
-
-  # coverage:
-  #   uses: sxzz/workflows/.github/workflows/coverage.yml@main
-  #   needs: unit-test
-  #   permissions:
-  #     id-token: write
+  check:
+    name: ${{ matrix.os }} · native + Harness browser L2
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Browser-only L2 against an independently installed Harness. Not Tauri L3.
+      CI: true
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dsh-ops-next-browsers
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Verify the exact upstream source
+        run: test "$(git -C source/dsh-ops rev-parse HEAD)" = 6e133320b4f7a81c289e05ff6afddc740cdef36e
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.10.0
+          cache: pnpm
+      - name: Install the Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal && rustup default 1.98.1
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Record the actual runner target
+        run: node -p 'JSON.stringify({platform:process.platform,arch:process.arch,node:process.version})' && rustc -vV
+      - name: Install locked development dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Lint
+        run: pnpm run lint
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Unit tests
+        run: pnpm run test -- --run
+      - name: Build the published JavaScript and pinned upstream
+        run: pnpm run build
+      - name: Build the native Rust worker on this runner
+        run: pnpm run build:native
+      - name: Native Rust regression tests
+        run: cargo test --locked --manifest-path .cache/native/Cargo.toml
+      - name: Explicitly provision pinned Windows Bash and build its matching IPC proxies
+        if: runner.os == 'Windows'
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-ops-next-package-runtime
+        run: |
+          node dist/cli.js provision --bash --managed
+          BASH_ROOT=$(node -p 'require("node:path").join(process.env.DSH_HOME,"dsh-ops/shells/bash/2.56.0.2")')
+          node scripts/build-bash-ipc.mjs --bash-root "$BASH_ROOT"
+          echo "DSH_E2E_CONFINED_BASH_PATH=$BASH_ROOT/bin/bash.exe" >> "$GITHUB_ENV"
+      - name: Install Chromium and its system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Real isolated Harness host and Playwright browser L2
+        # Installs @deepseek-ai/dsh@0.2.1-alpha.1 in mkdtemp; no existing DSH fallback.
+        # FastCtx is explicitly provisioned in that same test-owned home, not stubbed.
+        run: pnpm run test:e2e
+      - name: Package the tested native target without rebuilding it away
+        run: pnpm --config.ignore-scripts=true pack
+      - name: Upload the built platform package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: dsh-ops-next-*.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload browser traces and real host/provision logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-l2-${{ matrix.os }}
+          path: |
+            playwright-report/
+            test-results/e2e/
+          if-no-files-found: ignore
+          retention-days: 7

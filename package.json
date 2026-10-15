@@ -1,18 +1,18 @@
 {
-  "name": "pkg-placeholder",
+  "name": "dsh-ops-next",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "packageManager": "pnpm@11.15.1",
-  "description": "_description_",
+  "description": "Maintained, consent-first DSH operations: native files, Bash, background jobs and PTC",
   "author": "Hairy <wwu710632@gmail.com>",
-  "license": "MIT",
-  "homepage": "https://github.com/dsh-tauri-desk/pkg-placeholder#readme",
+  "license": "MIT AND Apache-2.0",
+  "homepage": "https://github.com/hairyf/dsh-ops-next#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dsh-tauri-desk/pkg-placeholder.git"
+    "url": "git+https://github.com/hairyf/dsh-ops-next.git"
   },
-  "bugs": "https://github.com/dsh-tauri-desk/pkg-placeholder/issues",
-  "keywords": [],
+  "bugs": "https://github.com/hairyf/dsh-ops-next/issues",
+  "keywords": ["dsh", "deepseek-harness", "plugin", "operations"],
   "sideEffects": false,
   "exports": {
     ".": "./dist/index.js",
@@ -22,16 +22,21 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": { "dsh-ops-next": "./dist/cli.js" },
   "files": [
     "README.md",
     "cordis.patch.yml",
     "dist"
   ],
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     },
@@ -40,13 +45,16 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
+    "build": "tsdown && node scripts/prepare-upstream.mjs",
+    "build:native": "node scripts/build-native.mjs",
+    "build:bash-ipc": "node scripts/build-bash-ipc.mjs",
+    "dev": "node scripts/prepare-upstream.mjs && tsdown --watch --no-clean",
     "lint": "eslint",
-    "prepack": "nr build",
+    "prepack": "pnpm run build && pnpm run build:native",
     "release": "bumpp",
     "start": "tsx src/index.ts",
     "test": "pnpm run build && vitest",
+    "test:e2e": "node test/e2e/run.mjs",
     "typecheck": "tsc",
     "prepare": "git config core.hooksPath .githooks && simple-git-hooks && skills-npm"
   },
@@ -81,6 +89,7 @@
     "@deepseek-ai/dsh-client-store": "catalog:dsh",
     "@deepseek-ai/dsh-client-ui-conversation": "catalog:dsh",
     "@deepseek-ai/dsh-client-ui-layout": "catalog:dsh",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "catalog:",
     "@deepseek-ai/dsh-client-ui-primitives": "catalog:dsh",
     "@deepseek-ai/dsh-client-ui-renderer": "catalog:dsh",
     "@deepseek-ai/dsh-client-ui-session": "catalog:dsh",
@@ -101,11 +110,15 @@
     "@deepseek-ai/dsh-util-code-language": "catalog:dsh",
     "@deepseek-ai/dsh-util-values": "catalog:dsh",
     "@deepseek-ai/dsh-workspace": "catalog:dsh",
+    "@deepseek-ai/schemastery": "catalog:",
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:types",
+    "@types/react": "catalog:",
     "bumpp": "catalog:cli",
     "eslint": "catalog:cli",
     "nano-staged": "catalog:cli",
     "publint": "catalog:cli",
+    "react": "catalog:",
     "simple-git-hooks": "catalog:cli",
     "skills-npm": "catalog:cli",
     "tsdown": "catalog:cli",
@@ -120,6 +133,6 @@
     "pre-commit": "pnpm i --frozen-lockfile --ignore-scripts --offline && pnpm run build && npx nano-staged"
   },
   "nano-staged": {
-    "*": "eslint --fix"
+    "*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}": "eslint --fix"
   }
 }
