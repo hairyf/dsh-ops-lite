@@ -64,5 +64,5 @@ jobs:
           for NAME in @dshopslite/win32-x64 @dshopslite/linux-x64 @dshopslite/darwin-arm64 dsh-ops-lite; do
             FILE="${NAME#@}"
             FILE="${FILE/\//-}"
-            npm publish "npm-packages/$FILE-$VERSION.tgz" --provenance --access public --ignore-scripts
+            npm publish "./npm-packages/$FILE-$VERSION.tgz" --provenance --access public --ignore-scripts
           done
