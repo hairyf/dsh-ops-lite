@@ -1,0 +1,16 @@
+{
+  "name": "dsh-ops-lite-darwin-arm64",
+  "version": "0.1.0",
+  "description": "macOS arm64 native runtime for dsh-ops-lite",
+  "license": "MIT AND Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hairyf/dsh-ops-lite.git",
+    "directory": "packages/darwin-arm64"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "exports": { "./package.json": "./package.json" },
+  "files": ["licenses", "runtime"],
+  "publishConfig": { "access": "public" }
+}

@@ -13,8 +13,6 @@ const dist = path.join(root, 'dist')
 const triples = {
   'win32-x64': 'x86_64-pc-windows-msvc',
   'linux-x64': 'x86_64-unknown-linux-gnu',
-  'linux-arm64': 'aarch64-unknown-linux-gnu',
-  'darwin-x64': 'x86_64-apple-darwin',
   'darwin-arm64': 'aarch64-apple-darwin',
 }
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
@@ -97,7 +95,7 @@ async function shellTree(kind) {
   return { directory, pin }
 }
 
-/** Build only this host's complete runtime. Installation and plugin loading never build or download. */
+/** Build this machine's complete runtime in CI/development, never during npm installation or plugin loading. */
 export async function buildRuntime() {
   const target = `${process.platform}-${process.arch}`
   const triple = triples[target]

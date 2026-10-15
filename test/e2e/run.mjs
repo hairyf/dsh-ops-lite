@@ -1,19 +1,27 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-// Always install a fresh CLI. Never discover or fall back to the user's Harness.
+// Test actual npm tarballs and a fresh CLI, never checkout assets or a user Harness.
 async function main() {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'dsh-ops-lite-e2e-')))
   const installation = path.join(root, 'installation')
   const home = path.join(root, 'home')
   const project = fileURLToPath(new URL('../../', import.meta.url))
   const version = '0.2.1-alpha.1'
+  const targets = ['win32-x64', 'linux-x64', 'darwin-arm64']
+  const target = `${process.platform}-${process.arch}`
+  assert(targets.includes(target), `No npm runtime package is shipped for ${target}.`)
   const keepTemp = process.env.DSH_E2E_KEEP_TMP === '1' && !process.env.CI
+  let tarball = process.env.DSH_E2E_TARBALL
+  let platformTarball = process.env.DSH_E2E_PLATFORM_TARBALL
+  assert.equal(Boolean(tarball), Boolean(platformTarball), 'Supply both DSH_E2E_TARBALL and DSH_E2E_PLATFORM_TARBALL, or pack the already-built workspace.')
   console.warn(`Independent Harness test directory: ${root}`)
   const nodeDirectory = path.dirname(process.execPath)
   const npmCandidates = [
@@ -36,11 +44,24 @@ async function main() {
     XDG_CACHE_HOME: path.join(home, '.cache'),
     npm_config_cache: path.join(root, 'npm-cache'),
     npm_config_userconfig: path.join(home, '.npmrc'),
+    CARGO_HOME: path.join(root, 'cargo'),
+    RUSTUP_HOME: path.join(root, 'rustup'),
   })
+  const installEnv = { ...env }
+  for (const key of Object.keys(installEnv)) {
+    if (/^(?:path|npm_config_script_shell|VSINSTALLDIR|VCINSTALLDIR|VCToolsInstallDir|INCLUDE|LIB|LIBPATH|CARGO_TARGET_.*_LINKER|RUSTC|RUSTC_WRAPPER)$/i.test(key))
+      delete installEnv[key]
+  }
+  installEnv.PATH = process.platform === 'win32' ? `${nodeDirectory}${path.delimiter}${path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32')}` : nodeDirectory
+  installEnv.npm_config_script_shell = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32/cmd.exe') : '/bin/sh'
 
-  function run(argv) {
+  function run(argv, { capture = false, executable = process.execPath, childEnv = env } = {}) {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, argv, { cwd: project, env, stdio: 'inherit', detached: process.platform !== 'win32' })
+      const child = spawn(executable, argv, { cwd: project, env: childEnv, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: process.platform !== 'win32' })
+      let output = ''
+      let errors = ''
+      child.stdout?.on('data', chunk => output += chunk.toString())
+      child.stderr?.on('data', chunk => errors += chunk.toString())
       const stop = () => {
         if (process.platform === 'win32')
           spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).once('error', reject)
@@ -53,22 +74,112 @@ async function main() {
         process.off('SIGINT', stop)
         process.off('SIGTERM', stop)
         if (code === 0)
-          resolve()
-        else reject(new Error(`${path.basename(argv[0])} failed (${signal ?? code})`))
+          resolve(output)
+        else reject(new Error(`${path.basename(executable)} ${argv[0]} failed (${signal ?? code})\n${errors}`))
       })
     })
   }
+  const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex')
 
   try {
-    await access(path.join(project, `dist/runtime/${process.platform}-${process.arch}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
     await mkdir(home, { recursive: true })
-    await run([npmCli, 'install', '--prefix', installation, '--no-audit', '--no-fund', '--ignore-scripts', `@deepseek-ai/dsh@${version}`])
+    if (!tarball) {
+      const pnpm = process.env.npm_execpath
+      assert(pnpm && /pnpm/i.test(pnpm), 'Use pnpm run test:e2e after building/staging the platform package, or supply both tarball paths.')
+      const packages = path.join(root, 'packages')
+      await mkdir(packages)
+      for (const filter of [[], ['--filter', `dsh-ops-lite-${target}`]]) {
+        const args = [...filter, '--config.ignore-scripts=true', 'pack', '--pack-destination', packages]
+        await run(/\.[cm]?js$/.test(pnpm) ? [pnpm, ...args] : args, { executable: /\.[cm]?js$/.test(pnpm) ? process.execPath : pnpm })
+      }
+      const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
+      tarball = path.join(packages, `dsh-ops-lite-${manifest.version}.tgz`)
+      platformTarball = path.join(packages, `dsh-ops-lite-${target}-${manifest.version}.tgz`)
+    }
+    const inspected = []
+    for (const [file, name] of [[tarball, 'dsh-ops-lite'], [platformTarball, `dsh-ops-lite-${target}`]]) {
+      assert(path.isAbsolute(file) && file.endsWith('.tgz'), 'Require explicit absolute npm tarball paths.')
+      await access(file)
+      const [packed] = JSON.parse(await run([npmCli, 'pack', file, '--dry-run', '--ignore-scripts', '--json'], { capture: true }))
+      assert.equal(packed.name, name)
+      // Git Bash's tar treats a Windows drive letter as a remote host; use the native archive tool.
+      const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32/tar.exe') : 'tar'
+      const manifest = JSON.parse(await run(['-xOf', file, 'package/package.json'], { executable: tar, capture: true }))
+      assert.equal(manifest.name, name)
+      assert.equal(manifest.version, packed.version)
+      for (const lifecycle of ['preinstall', 'install', 'postinstall'])
+        assert.equal(manifest.scripts?.[lifecycle], undefined, `${name} must not need an installer or compilation hook.`)
+      assert.deepEqual(manifest.dependencies ?? {}, {}, `${name} must not add external runtime JavaScript dependencies.`)
+      inspected.push({ ...packed, manifest, tarballSha256: await sha256(file) })
+    }
+    const [packed, platformPacked] = inspected
+    assert.equal(platformPacked.version, packed.version)
+    assert.deepEqual(platformPacked.manifest.os, [process.platform])
+    assert.deepEqual(platformPacked.manifest.cpu, [process.arch])
+    assert.deepEqual(packed.manifest.optionalDependencies, Object.fromEntries(targets.map(target => [`dsh-ops-lite-${target}`, packed.version])))
+    const files = packed.files.map(file => file.path)
+    assert(!files.some(file => /^(?:build\/|dist\/(?:runtime|vendor|licenses)(?:\/|$)|\.cache\/|node_modules\/|native\/|vendor\/|src\/|bin\/)|\/(?:target|node_modules)\//.test(file) || file === 'runtime-manifest.json'), 'The main package must contain no native payloads, installer, source-build inputs or caches.')
+    for (const required of ['dist/index.js', 'dist/client.js', 'dist/shell.js', 'dist/background.js', 'dist/ptc.js', 'dist/prepare-workspace.ps1', 'cordis.patch.yml'])
+      assert(files.includes(required), `Main package is missing ${required}`)
+    const platformFiles = platformPacked.files.map(file => file.path)
+    assert(platformFiles.some(file => file.startsWith('licenses/')), 'Platform package must retain its runtime licenses.')
+    assert(!platformFiles.some(file => /^(?:src|native|build|node_modules)\//.test(file)), 'Platform package must not contain source-build inputs.')
+    for (const other of targets.filter(other => other !== target))
+      assert(!platformFiles.some(file => file.startsWith(`runtime/${other}/`) || file.startsWith(`vendor/bash/${other}/`) || file.startsWith(`vendor/pwsh/${other}/`)), 'Package only this runner\'s actual OS/CPU assets.')
+    console.warn(`Main package: ${packed.filename}, ${packed.size} bytes, SHA256 ${packed.tarballSha256}`)
+    console.warn(`Platform package: ${platformPacked.filename}, ${platformPacked.size} bytes, SHA256 ${platformPacked.tarballSha256}`)
+
+    await run([npmCli, 'install', '--prefix', installation, '--no-audit', '--no-fund', '--ignore-scripts', '--omit=dev', `@deepseek-ai/dsh@${version}`])
     const cli = path.join(installation, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
     await access(cli)
     const manifest = JSON.parse(await readFile(path.join(installation, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8'))
     assert.equal(manifest.version, version)
     assert((await realpath(cli)).startsWith(`${await realpath(installation)}${path.sep}`))
     env.DSH_E2E_DSH_BIN = cli
+    for (const tool of ['cargo', 'rustc', 'cl', 'link']) {
+      await new Promise((resolve, reject) => {
+        const probe = spawn(tool, ['--version'], { env: installEnv, stdio: 'ignore', windowsHide: true })
+        probe.once('error', error => error.code === 'ENOENT' ? resolve() : reject(error))
+        probe.once('exit', () => reject(new Error(`The isolated installation unexpectedly has ${tool} available.`)))
+      })
+    }
+    for (const [option, incompatible] of [['os', process.platform === 'linux' ? 'darwin' : 'linux'], ['cpu', process.arch === 'x64' ? 'arm64' : 'x64']]) {
+      const prefix = path.join(root, `incompatible-${option}`)
+      await mkdir(prefix)
+      await writeFile(path.join(prefix, 'package.json'), JSON.stringify({ private: true, optionalDependencies: { [platformPacked.name]: `file:${platformTarball}` } }))
+      await run([npmCli, 'install', '--prefix', prefix, '--no-audit', '--no-fund', '--ignore-scripts', '--omit=dev', `--${option}=${incompatible}`], { capture: true, childEnv: installEnv })
+      await assert.rejects(access(path.join(prefix, 'node_modules', platformPacked.name)), { code: 'ENOENT' }, `npm must omit the optional platform package for an incompatible ${option}.`)
+    }
+    console.warn('Installing the platform and main tarballs with no lifecycle scripts or Rust/MSVC tools on PATH.')
+    await run([npmCli, 'install', '--prefix', installation, '--no-audit', '--no-fund', '--omit=dev', '--ignore-scripts', platformTarball, tarball], { childEnv: installEnv })
+    const plugin = path.join(installation, 'node_modules/dsh-ops-lite')
+    assert.equal(await realpath(plugin), plugin, 'The tested plugin must be installed, not a checkout link.')
+    const installed = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8'))
+    assert.deepEqual(installed, packed.manifest, 'Install the exact inspected main tarball.')
+    const platformRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`dsh-ops-lite-${target}/package.json`))
+    assert.equal(await realpath(platformRoot), path.join(installation, `node_modules/dsh-ops-lite-${target}`), 'Execute assets directly from the installed platform package.')
+    assert.deepEqual(JSON.parse(await readFile(path.join(platformRoot, 'package.json'), 'utf8')), platformPacked.manifest)
+    await assert.rejects(access(path.join(plugin, 'dist/runtime')), { code: 'ENOENT' }, 'Do not copy platform payloads into the main package.')
+    for (const other of targets.filter(other => other !== target))
+      await assert.rejects(access(path.join(installation, `node_modules/dsh-ops-lite-${other}`)), { code: 'ENOENT' }, 'npm must not install another OS/CPU runtime package.')
+    const evidence = { tarball: packed.filename, tarballSha256: packed.tarballSha256, packageBytes: packed.size, platformTarball: platformPacked.filename, platformTarballSha256: platformPacked.tarballSha256, platformPackageBytes: platformPacked.size, target, version: installed.version, compilerToolsAvailable: false, npmOsCpuFilteringVerified: true, platformRoot, runtimes: [] }
+    for (const [name, receiptName, binaryVersion] of [['dsh-ops-worker', 'provenance.json', installed.version], ['fastctx', 'fastctx.provenance.json', '0.2.6']]) {
+      const executable = `${name}${process.platform === 'win32' ? '.exe' : ''}`
+      const runtime = path.join(platformRoot, 'runtime', target)
+      const receipt = JSON.parse(await readFile(path.join(runtime, receiptName), 'utf8'))
+      assert.equal(receipt.target, target)
+      assert.equal(receipt.version, binaryVersion)
+      assert.equal(receipt.executable, executable)
+      assert.equal(receipt.sha256, await sha256(path.join(runtime, executable)))
+      const output = (await run(['--version'], { executable: path.join(runtime, executable), capture: true, childEnv: installEnv })).trim()
+      assert.equal(output, `${name} ${binaryVersion}`)
+      evidence.runtimes.push({ ...receipt, versionOutput: output })
+      console.warn(`Installed ${target}: ${output}; SHA256 ${receipt.sha256}`)
+    }
+    env.DSH_E2E_PLUGIN_ROOT = plugin
+    const report = path.join(project, 'test-results/e2e-installation.json')
+    await mkdir(path.dirname(report), { recursive: true })
+    await writeFile(report, `${JSON.stringify(evidence, null, 2)}\n`)
     const playwright = fileURLToPath(import.meta.resolve('@playwright/test/cli'))
     if (!process.env.PLAYWRIGHT_BROWSERS_PATH)
       await run([playwright, 'install', 'chromium'])

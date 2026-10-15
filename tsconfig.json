@@ -16,5 +16,5 @@
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test", "tsdown.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "test", "tsdown.config.ts", "vitest.config.ts", "playwright.config.ts", "bump.config.ts"]
 }

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh-ops-ptc",
+    "description": "Native Rust safe batch operations and bounded result references, only in PTC-only sessions."
+  }
+}

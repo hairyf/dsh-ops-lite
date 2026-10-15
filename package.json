@@ -12,7 +12,12 @@
     "url": "git+https://github.com/hairyf/dsh-ops-lite.git"
   },
   "bugs": "https://github.com/hairyf/dsh-ops-lite/issues",
-  "keywords": ["dsh", "deepseek-harness", "plugin", "operations"],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "operations"
+  ],
   "sideEffects": false,
   "exports": {
     ".": "./dist/index.js",
@@ -39,9 +44,15 @@
   "files": [
     "README.md",
     "cordis.patch.yml",
-    "dist"
+    "dist/*.d.ts",
+    "dist/*.js",
+    "dist/*.map",
+    "dist/components",
+    "dist/prepare-workspace.ps1"
   ],
-  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "dsh": {
     "client": {
       "inject": [
@@ -67,7 +78,7 @@
     "test": "pnpm run build && vitest",
     "test:e2e": "node test/e2e/run.mjs",
     "typecheck": "tsc",
-    "preinstall": "git config core.hooksPath .githooks && simple-git-hooks && skills-npm"
+    "hooks": "git config core.hooksPath .githooks && simple-git-hooks"
   },
   "scripts-info": {
     "build": "Build the library for publishing",
@@ -78,7 +89,12 @@
     "start": "Run the entry file",
     "test": "Run the test suite",
     "typecheck": "Check types",
-    "prepare": "Set up git hooks and skills"
+    "hooks": "Set up development git hooks"
+  },
+  "optionalDependencies": {
+    "dsh-ops-lite-darwin-arm64": "workspace:*",
+    "dsh-ops-lite-linux-x64": "workspace:*",
+    "dsh-ops-lite-win32-x64": "workspace:*"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:cli",

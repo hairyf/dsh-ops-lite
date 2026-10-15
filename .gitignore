@@ -5,7 +5,12 @@
 *.log
 *.tgz
 coverage
-dist
+dist/licenses
+dist/runtime
+dist/vendor
+packages/*/runtime
+packages/*/vendor
+packages/*/licenses
 lib-cov
 logs
 node_modules

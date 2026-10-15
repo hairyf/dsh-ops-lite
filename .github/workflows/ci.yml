@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -12,20 +13,24 @@ permissions:
 
 jobs:
   check:
-    name: ${{ matrix.os }} · native + Harness browser L2
+    name: ${{ matrix.target }} · build and native regression tests
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: windows-2022
+            target: win32-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
     env:
-      # Browser-only L2 against an independently installed Harness. Not Tauri L3.
       CI: 'true'
-      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +46,7 @@ jobs:
         with:
           node-version: 24.10.0
           cache: pnpm
-      - name: Install the Rust toolchain
+      - name: Install the build-only Rust toolchain
         run: rustup toolchain install 1.98.1 --profile minimal && rustup default 1.98.1
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
@@ -52,15 +57,18 @@ jobs:
           $linker = Join-Path $env:VCToolsInstallDir 'bin/Hostx64/x64/link.exe'
           if (!(Test-Path -LiteralPath $linker)) { throw "MSVC linker missing: $linker" }
           "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker" >> $env:GITHUB_ENV
-      - name: Record the actual runner target
-        run: node -p 'JSON.stringify({platform:process.platform,arch:process.arch,node:process.version})' && rustc -vV
+      - name: Verify the actual build target
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: node -e 'require("node:assert/strict").equal(process.platform+"-"+process.arch,process.env.EXPECTED_TARGET)' && rustc -vV
       - name: Install locked development dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Lint
         run: pnpm run lint
       - name: Typecheck
         run: pnpm run typecheck
-      - name: Unit tests and coverage
+      - name: Build all JavaScript and runtime assets, then run unit tests and coverage
+        # The existing test script runs the build hook once before Vitest.
         run: pnpm run test --run --coverage
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
@@ -71,33 +79,92 @@ jobs:
           files: ./coverage/lcov.info
           disable_search: true
           fail_ci_if_error: true
-      - name: Build JavaScript, Rust worker, FastCtx and platform runtime assets
-        # The tsdown hook owns all required native/assets builds; no user provisioning.
-        run: pnpm run build
       - name: Native Rust regression tests
         run: cargo test --locked --manifest-path native/Cargo.toml --target-dir .cache/runtime/worker-target
-      - name: Install Chromium and its system dependencies
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Real isolated Harness host and Playwright browser L2
-        # Installs @deepseek-ai/dsh@0.2.1-alpha.1 in mkdtemp; no existing DSH fallback.
-        # Real default tools, background jobs, PTC, native I/O and confined Bash; no stubs.
-        run: pnpm run test:e2e
-      - name: Package the tested native target without rebuilding it away
-        run: pnpm --config.ignore-scripts=true pack
-      - name: Upload the built platform package
-        uses: actions/upload-artifact@v4
+      - name: Stage and pack only this runner's platform package
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          node build/package-runtime.mjs
+          OUT="$(node -p 'require("node:path").resolve(".cache/package")')"
+          pnpm --filter "dsh-ops-lite-$TARGET" --config.ignore-scripts=true pack --pack-destination "$OUT"
+      - name: Pack the portable main package once without rerunning prepack
+        if: runner.os == 'Linux'
+        run: pnpm --config.ignore-scripts=true pack --pack-destination .cache/package
+      - uses: actions/upload-artifact@v4
         with:
-          name: package-${{ matrix.os }}
-          path: dsh-ops-lite-*.tgz
+          name: platform-package-${{ matrix.target }}
+          path: .cache/package/dsh-ops-lite-${{ matrix.target }}-*.tgz
           if-no-files-found: error
           retention-days: 7
-      - name: Upload browser traces and real host logs
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: main-package
+          path: .cache/package/dsh-ops-lite-[0-9]*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  installation-l2:
+    needs: check
+    name: ${{ matrix.target }} · no-compiler npm install + Harness browser L2
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: windows-2022
+            target: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Independent Harness web + Chromium L2, not Tauri L3. No toolchain setup here.
+      CI: 'true'
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.10.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: main-package
+          path: .cache/package
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-package-${{ matrix.target }}
+          path: .cache/package
+      - name: Install Chromium and its system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Install the matching platform tarball and the same main tarball, then exercise every real L2 assertion
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          export DSH_E2E_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dsh-ops-lite-"+require("./package.json").version+".tgz")')"
+          export DSH_E2E_PLATFORM_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dsh-ops-lite-"+process.env.TARGET+"-"+require("./package.json").version+".tgz")')"
+          pnpm run test:e2e
+      - name: Upload installation evidence, browser traces and real host logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: harness-l2-${{ matrix.os }}
+          name: harness-l2-${{ matrix.target }}
           path: |
             playwright-report/
             test-results/e2e/
+            test-results/e2e-installation.json
           if-no-files-found: ignore
           retention-days: 7

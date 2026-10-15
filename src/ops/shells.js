@@ -1,60 +1,14 @@
 /**
- * The two shell rungs below FastCtx: the plugin's own bash and PowerShell 7.
- *
- * This module is the ONLY place that answers "can this deployment run the
- * plugin's bash / pwsh right now, and where is the executable". It is pure and
- * read-only: it probes configured paths, the provisioned copies
- * `dsh-ops provision-shells` installed under `<DSH_HOME>/dsh-ops/shells`, the
- * copies a plugin package carries, and the conventional install locations, and
- * it NEVER mutates ambient state (no PATH writes, no profile writes, no
- * `process.chdir`). A rung that cannot be resolved reports `available: false`
- * with the reason; it never throws, so a missing shell degrades the prompt
- * ladder instead of failing the plugin.
- *
- * The binaries themselves are not redistributed: {@link SHELL_UPSTREAM_PINS}
- * names the upstream release and digest each shell is pinned to, and
- * `dsh-ops provision-shells` is what turns those pointers into a local,
- * digest-checked copy.
- *
- * Contract (both halves are implemented beside each other):
- *
- * - {@link resolveShells} is called synchronously during mount and its result
- *   feeds the prompt ladder (`lib/policy.js` renders only the available rungs).
- * - {@link publishShellTools} is called inside one `ctx.effect` during mount and
- *   returns the disposer for whatever tool registrations it made (today: the
- *   `ops_bash` tool backed by the plugin's own bash). Returning a no-op disposer
- *   is valid.
- *
- * Why L2 publishes a tool instead of configuring an executor: `bash-local` has
- * no executable field (`packages/shell/bash-local/src/index.ts` — its `Config`
- * is `cwd`/`timeoutMs`/`maxTimeoutMs`/`maxOutputBytes`/`maxSpillBytes`/
- * `graceMs` only), so the only zero-internal-dependency way to run the plugin's
- * own bash is to publish `ops_bash` ourselves and execute through
- * `ctx.subprocess`. L3 needs no tool: `pwsh-sandbox` inherits `pwshPath`
- * verbatim (`packages/shell/pwsh-sandbox/src/index.ts:40`,
- * `type Config = LocalConfig`), so `cordis.patch.yml` points that row at the
- * executable this module resolves — provisioned copy first, bundled layouts
- * after it, in the order {@link PWSH_LAYOUT_ORDER} names. That is also why L3
- * has no `available` beyond "the executable is there": the rung and the host row
- * are the same fact, and a config key could not reach the row anyway (a bundle
- * patch is evaluated before this plugin's own row is mounted).
- *
- * Invariants this module keeps (PLAN §2.7):
- * - the child environment is exactly the terminal overrides; credential-shaped
- *   names and `DSH_*` facts are never forwarded by it
- *   (`packages/subprocess/README.md:80`);
- * - `process.env` is read, never written; `process.chdir` is never called;
- * - a rung that cannot be resolved reports `available: false` and publishes
- *   nothing — losing the bash rung must never fail plugin activation.
- *
- * @module dsh-ops/shells
+ * Resolve shells without writing PATH, profiles or the working directory.
+ * Windows shells come from the exact npm runtime package; Unix uses system Bash.
+ * Configured Bash paths remain authoritative. Missing runtime packages fail closed;
+ * there is no provisioner, download or compilation fallback.
  */
 
 import fs from 'node:fs'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
-import { dshHome, PACKAGE_ROOT } from './binary.js'
+import { PACKAGE_ROOT, runtimeRoot } from './binary.js'
 import { publicToolName } from './policy.js'
 
 /** The directory this module was loaded from; the resolution root of a checkout. */
@@ -107,31 +61,20 @@ export const ENV_OVERRIDES = Object.freeze({
   GIT_PAGER: 'cat',
 })
 
-/**
- * The platform packages a deployment MAY carry a shell in, and the subdirectory
- * each keeps its shell in. Nothing requires them: the pinned upstream download
- * (`dsh-ops provision-shells`) is the route that needs no package at all, and
- * this layout is still probed so a deployment that installed one — or a checkout
- * that vendors its own copy — is honoured. {@link BUNDLED_LAYOUT_ORDER} names
- * the order of the two bundled layouts.
- */
-export const PLATFORM_PACKAGES = Object.freeze({
-  bash: { prefix: '@dsh-ops/bash-', executable: 'bash.exe', vendor: 'bash' },
-  pwsh: { prefix: '@dsh-ops/pwsh-', executable: 'pwsh.exe', vendor: 'pwsh' },
+/** Windows vendor layouts within the exact npm runtime package. */
+const SHELL_LAYOUTS = Object.freeze({
+  bash: { executable: 'bash.exe', vendor: 'bash' },
+  pwsh: { executable: 'pwsh.exe', vendor: 'pwsh' },
 })
 
 /**
  * The upstream release each bundled shell is pinned to.
  *
- * THIS TABLE IS THE SINGLE SOURCE for "which upstream bytes does this
- * distribution point at". `dsh-ops provision-shells` downloads exactly these
- * assets and checks exactly these digests, and the release build imports the
- * same entries to publish the pinned facts beside the packages it assembles —
- * so a version, a URL, or a digest is edited in one place.
+ * CI/development builds use these exact archives and digests when assembling
+ * the Windows npm runtime package. Plugin loading never downloads them.
  *
  * - `sha256` is the digest of the archive exactly as published upstream;
- * - `executableSha256` is the digest of the file at `executableRelativePath`
- *   inside it, which the provisioner re-checks after unpacking;
+ * - `executableSha256` is checked by the build after unpacking;
  * - `extractor` says how the archive is opened (`zip` through Windows' own
  *   bsdtar, `sfx-7z` by running the archive's own self-extractor) and
  *   `extractTo` where the archive's ROOT lands inside the version directory, so
@@ -196,43 +139,12 @@ export function shellUpstreamPin({ kind, platform = process.platform, arch = pro
 }
 
 /**
- * The provisioned-shell store: where `dsh-ops provision-shells` installs the
- * copies the plugin prefers over anything the machine happens to have.
- * @param {object} [options] - resolution inputs.
- * @param {NodeJS.ProcessEnv} [options.env] - the environment to read `DSH_HOME` from.
- * @returns {string} the absolute directory (`<DSH_HOME>/dsh-ops/shells`).
- */
-export function provisionedShellStore({ env = process.env } = {}) {
-  return path.join(dshHome(env), 'dsh-ops', 'shells')
-}
-
-/**
- * The version directory one pin provisions into.
- * @param {object} options - resolution inputs.
- * @param {'bash'|'pwsh'} options.kind - which shell.
- * @param {string} options.version - the pin's version.
- * @param {NodeJS.ProcessEnv} [options.env] - the environment to read `DSH_HOME` from.
- * @returns {string} the absolute directory (`<store>/<name>/<version>`).
- */
-export function provisionedShellVersionDir({ kind, version, env = process.env }) {
-  return path.join(provisionedShellStore({ env }), kind, version)
-}
-
-/**
- * Every place this plugin's own PowerShell 7 can come from, most preferred
- * first — the order `cordis.patch.yml`'s L3 expression implements, in the same
- * order and with the same existence rule.
- * @type {readonly ['provisioned', 'package', 'vendor']}
- */
-export const PWSH_LAYOUT_ORDER = Object.freeze(['provisioned', 'package', 'vendor'])
-
-/**
  * One shell rung's resolution.
  * @typedef {object} ShellResolution
  * @property {boolean} available - whether this rung can run right now.
  * @property {string|undefined} file - the resolved executable, when available.
  * @property {string} source - where the answer came from, for reports and tests.
- *   One of `disabled`, `config`, `provisioned`, `bundled`, `path`, `well-known`,
+ *   One of `disabled`, `config`, `bundled`, `path`, `well-known`,
  *   `missing`.
  * @property {string} detail - a one-line English explanation, for reports.
  */
@@ -271,22 +183,6 @@ function platformKey(platform, arch) {
 }
 
 /**
- * The two layouts the plugin's own shell can arrive in, in the order they are
- * preferred. Phase C publishes `@dsh-ops/<kind>-<platform>-<arch>` (the shell
- * at `bin/<exe>`); a checkout that vendors its own copy uses
- * `vendor/<kind>/<platform>-<arch>/<exe>`.
- *
- * The ORDER is part of the contract, not an implementation detail: the L3
- * `!!js` override in `cordis.patch.yml` probes the same two places in the same
- * order (it cannot import this module — a bundle patch is plain YAML), so the
- * ladder's `available`/`file` and the host row's executable must agree for
- * every layout a deployment can present. `test/shells.test.mjs` asserts that
- * agreement against both layouts.
- * @type {readonly ['package', 'vendor']}
- */
-export const BUNDLED_LAYOUT_ORDER = Object.freeze(['package', 'vendor'])
-
-/**
  * The vendored bundled shell inside the package, whether or not it exists.
  * @param {object} options - resolution inputs.
  * @param {'bash'|'pwsh'} options.kind - which rung.
@@ -296,80 +192,12 @@ export const BUNDLED_LAYOUT_ORDER = Object.freeze(['package', 'vendor'])
  * @returns {string} the path the bundled copy would occupy.
  */
 export function bundledShellPath({ kind, bundleRoot, platform, arch }) {
-  const target = PLATFORM_PACKAGES[kind]
-  return path.join(bundleRoot, 'vendor', target.vendor, platformKey(platform, arch), ...(kind === 'bash' && platform === 'win32' ? ['bin'] : []), target.executable)
+  const target = SHELL_LAYOUTS[kind]
+  const root = platform === 'win32' ? runtimeRoot({ packageRoot: bundleRoot, platform, arch }) : bundleRoot
+  return path.join(root, 'vendor', target.vendor, platformKey(platform, arch), ...(kind === 'bash' && platform === 'win32' ? ['bin'] : []), target.executable)
 }
 
-/**
- * Why the plugin's own copy of one shell is unusable.
- *
- * The four values are the whole domain of a bundled miss, and they are what
- * {@link bashRemedy} switches on: the advice a deployment sees is chosen by
- * this fact rather than by matching words inside the detail, so editing the
- * sentence can never silently move a user onto the wrong remedy. The wording
- * of the facts is `lib/binary.js`'s (`packageBinaryAt` reports the same three
- * shapes in the same words), because a reader who has seen one side of this
- * plugin should recognise the other.
- * @typedef {'no-manifest'|'not-declared'|'not-installed'|'incomplete-tree'} BundledCause
- */
-
-/**
- * Where the installed platform package's shell would live, when that package is
- * resolvable at all.
- *
- * Every miss names itself twice: `detail` is the sentence a report shows, and
- * `cause` is the same fact in machine-readable form for the code that has to
- * choose what to tell the reader to do about it.
- * @param {object} options - resolution inputs.
- * @param {'bash'|'pwsh'} options.kind - which rung.
- * @param {string} options.bundleRoot - the plugin package root.
- * @param {string} options.platform - `process.platform`.
- * @param {string} options.arch - `process.arch`.
- * @returns {{found: true, file: string}|{found: false, detail: string, cause: BundledCause}} the candidate.
- */
-function platformPackageShell({ kind, bundleRoot, platform, arch }) {
-  const target = PLATFORM_PACKAGES[kind]
-  const name = `${target.prefix}${platformKey(platform, arch)}`
-  let declared
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(bundleRoot, 'package.json'), 'utf8'))
-    declared = { ...manifest.optionalDependencies, ...manifest.dependencies }
-  }
-  catch {
-    return { found: false, cause: 'no-manifest', detail: `${name} is not installed (no readable plugin manifest)` }
-  }
-  if (declared[name] === undefined) {
-    return { found: false, cause: 'not-declared', detail: `${name} is not installed` }
-  }
-  let directory
-  try {
-    const require = createRequire(path.join(bundleRoot, 'package.json'))
-    directory = path.dirname(require.resolve(`${name}/package.json`))
-  }
-  catch {
-    return { found: false, cause: 'not-installed', detail: `${name} is declared but not installed` }
-  }
-  const file = path.join(directory, 'bin', target.executable)
-  return isSpawnableFile(file)
-    ? { found: true, file }
-    : { found: false, cause: 'incomplete-tree', detail: `${name} is installed without bin/${target.executable}` }
-}
-
-/**
- * Pick the bundled shell from the layout candidates, first existing wins.
- *
- * This is the ONE preference rule both the probe and the patch expression
- * implement; see {@link BUNDLED_LAYOUT_ORDER}.
- * @param {(string|undefined)[]} candidates - candidate paths, most preferred first.
- * @returns {string|undefined} the first existing candidate.
- */
-export function preferredBundledFile(candidates) {
-  for (const candidate of candidates) {
-    if (isSpawnableFile(candidate))
-      return candidate
-  }
-  return undefined
-}
+/** @typedef {'incomplete-tree'} BundledCause */
 
 /**
  * The plugin's own copy of one shell, from whichever layout carries it: the
@@ -389,66 +217,10 @@ export function preferredBundledFile(candidates) {
  *   unusable — as text for a report, and as the cause behind it.
  */
 export function bundledShell({ kind, bundleRoot, platform, arch }) {
-  const packaged = platformPackageShell({ kind, bundleRoot, platform, arch })
-  const vendored = bundledShellPath({ kind, bundleRoot, platform, arch })
-  // The same preference rule, in the same order, as the L3 patch expression.
-  const file = preferredBundledFile([packaged.found ? packaged.file : undefined, vendored])
-  // A cause only ever explains a miss: a vendored copy that IS there outranks
-  // the platform package's absence, and reporting the absence beside a usable
-  // file would be a fact about nothing.
-  return file === undefined
-    ? { file: undefined, detail: packaged.detail, cause: packaged.cause }
-    : { file, detail: undefined, cause: undefined }
-}
-
-/**
- * The provisioned copy of one shell, out of the plugin-managed store.
- *
- * Layout: `<DSH_HOME>/dsh-ops/shells/<kind>/<version>/<executableRelativePath>`
- * — the directory `dsh-ops provision-shells` installs the pinned upstream
- * release into. Every version directory that actually holds the executable is a
- * candidate, and the greatest version name wins.
- *
- * That comparison IS the whole rule, deliberately: `cordis.patch.yml`'s L3
- * expression implements the identical one, because a bundle patch is plain YAML
- * and cannot import this module, and the ladder's PowerShell rung and the host's
- * `pwsh-sandbox` row must keep pointing at the same file. The store holds one
- * version per shell in normal use; a leftover version directory is what the
- * comparison is there for.
- *
- * A copy installed here was digest-checked against {@link SHELL_UPSTREAM_PINS}
- * when it arrived, which is why it outranks anything already on the machine
- * while still sitting below `config.<kind>Path` and below a system fallback's
- * own off switch.
- * @param {object} options - resolution inputs.
- * @param {'bash'|'pwsh'} options.kind - which rung.
- * @param {NodeJS.ProcessEnv} options.env - the environment to read `DSH_HOME` from.
- * @param {string} [options.platform] - `process.platform`.
- * @param {string} [options.arch] - `process.arch`.
- * @returns {{file: string, version: string}|undefined} the executable and the
- *   version directory it came from, or undefined when the store has none.
- */
-export function provisionedShell({ kind, env, platform = process.platform, arch = process.arch }) {
-  const store = path.join(provisionedShellStore({ env }), kind)
-  let versions
-  try {
-    versions = fs.readdirSync(store, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .sort()
-      .reverse()
-  }
-  catch {
-    return undefined
-  }
-  const relative = shellUpstreamPin({ kind, platform, arch })?.executableRelativePath
-    ?? path.join('bin', PLATFORM_PACKAGES[kind].executable)
-  for (const version of versions) {
-    const file = path.join(store, version, relative)
-    if (isSpawnableFile(file))
-      return { file, version }
-  }
-  return undefined
+  const file = bundledShellPath({ kind, bundleRoot, platform, arch })
+  return isSpawnableFile(file)
+    ? { file, detail: undefined, cause: undefined }
+    : { file: undefined, detail: `Runtime package does not contain ${kind}: ${file}`, cause: 'incomplete-tree' }
 }
 
 /**
@@ -562,60 +334,19 @@ function executableNames(kind, platform) {
  * because it is one decision — the spawn wording only adds the sentence's
  * closing period.
  */
-const GENERIC_BASH_REMEDY = 'run `dsh-ops provision-shells --bash` to install the pinned upstream copy'
+const GENERIC_BASH_REMEDY = 'reinstall dsh-ops-lite with optional dependencies enabled; no download or compilation fallback is used'
 
 /**
- * What to do about a bundled bash that is not there, chosen by cause.
- *
- * The two named causes are NOT interchangeable, and the difference is the whole
- * point of this mapping:
- *
- * - `not-installed` is the mirror shape. The manifest asked for the platform
- *   package, the registry the profile installed from did not carry it, and the
- *   package manager skipped it in silence (exit code 0, no warning). Nothing on
- *   this machine can repair a package that was never published there, so this
- *   line names that possibility and points at `dsh-ops provision-shells`, which
- *   bypasses the registry entirely. It deliberately does not say `repair`: that
- *   is the word issue #20 kept following into a dead end.
- * - `incomplete-tree` is the opposite: the package IS here and only its
- *   executable is missing, which reinstalling the profile's dependencies really
- *   does fix. That advice stays, with the registry-free copy offered beside it.
- *
- * Everything else — a package the manifest never declared, an unreadable
- * manifest, and any cause a future version adds without mapping it — falls
- * through to the provisioner alone. That is the explicit default branch (D8):
- * the resolution contract is "never throw", so an unmapped cause still gets a
- * line that is correct rather than silence.
- * @param {BundledCause|undefined} cause - why the plugin's own copy is unusable.
- * @returns {string} the remedy, as a clause that ends a detail line.
- */
-function bashRemedy(cause) {
-  if (cause === 'not-installed') {
-    return 'the registry this profile installed from may not carry that platform package, '
-      + 'so run `dsh-ops provision-shells --bash` to fetch the pinned copy from upstream releases instead'
-  }
-  if (cause === 'incomplete-tree') {
-    return 'reinstalling the profile\'s dependencies repairs that, or run '
-      + '`dsh-ops provision-shells --bash` to fetch the pinned copy from upstream releases instead'
-  }
-  return GENERIC_BASH_REMEDY
-}
-
-/**
- * Resolve the bash rung: explicit config, the provisioned copy, the plugin's own
- * copy, then — only while the deployment allows a system shell — PATH and the
+ * Resolve the bash rung: explicit config, the npm runtime package, then — only
+ * while the deployment allows a system shell — PATH and the
  * well-known install locations.
  *
  * A configured path is authoritative: when it is unusable the rung reports
  * `available: false` instead of quietly running a different shell.
  * @param {object} options - resolution inputs.
  * @param {string|undefined} options.configured - the configured executable.
- * @param {{file: string, version: string}|undefined} options.provisioned - the
- *   copy `provision-shells` installed, when the store has one.
  * @param {string|undefined} options.bundled - the plugin's own executable, when it has one.
  * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
- * @param {BundledCause|undefined} options.bundledCause - the same reason in machine-readable form;
- *   it decides which remedy the detail ends with.
  * @param {boolean} options.allowSystemFallback - whether system installations may be used.
  * @param {NodeJS.ProcessEnv} options.env - the environment to read.
  * @param {string} options.platform - `process.platform`.
@@ -623,10 +354,8 @@ function bashRemedy(cause) {
  */
 function resolveBash({
   configured,
-  provisioned,
   bundled,
   bundledDetail,
-  bundledCause,
   allowSystemFallback,
   env,
   platform,
@@ -641,14 +370,6 @@ function resolveBash({
           detail: `the configured bash executable does not exist: ${configured}`,
         }
   }
-  if (provisioned !== undefined) {
-    return {
-      available: true,
-      file: provisioned.file,
-      source: 'provisioned',
-      detail: `the bash this deployment provisioned from upstream (version ${provisioned.version})`,
-    }
-  }
   if (bundled !== undefined) {
     return {
       available: true,
@@ -662,9 +383,9 @@ function resolveBash({
       available: false,
       file: undefined,
       source: 'disabled',
-      detail: `no provisioned or bundled bash and allowSystemShellFallback is false${
+      detail: `no bundled bash and allowSystemShellFallback is false${
         bundledDetail === undefined ? '' : ` (${bundledDetail})`
-      }; ${bashRemedy(bundledCause)}`,
+      }; ${GENERIC_BASH_REMEDY}`,
     }
   }
   const onPath = fromPath({
@@ -684,10 +405,10 @@ function resolveBash({
     available: false,
     file: undefined,
     source: 'missing',
-    detail: `no bash found by config, a provisioned copy, a bundled copy, PATH, or a well-known `
+    detail: `no bash found by config, the runtime package, PATH, or a well-known `
       + `install location${
         bundledDetail === undefined ? '' : ` (${bundledDetail})`
-      }; ${bashRemedy(bundledCause)}`,
+      }; ${GENERIC_BASH_REMEDY}`,
   }
 }
 
@@ -701,23 +422,12 @@ function resolveBash({
  * deliberately no configured-path form: the row the plugin would have to
  * rewrite is resolved before any dsh-ops config is read.
  * @param {object} options - resolution inputs.
- * @param {{file: string, version: string}|undefined} options.provisioned - the
- *   copy `provision-shells` installed, when the store has one.
  * @param {string|undefined} options.bundled - the plugin's own pwsh, when it has one.
  * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
  * @param {boolean} options.allowSystemFallback - whether the host's pwsh may serve as the last rung.
  * @returns {ShellResolution} the resolution.
  */
-function resolvePwsh({ provisioned, bundled, bundledDetail, allowSystemFallback }) {
-  if (provisioned !== undefined) {
-    return {
-      available: true,
-      file: provisioned.file,
-      source: 'provisioned',
-      detail: 'the PowerShell 7 this deployment provisioned from upstream '
-        + `(version ${provisioned.version}), which the pwsh-sandbox override points at`,
-    }
-  }
+function resolvePwsh({ bundled, bundledDetail, allowSystemFallback }) {
   if (bundled !== undefined) {
     return {
       available: true,
@@ -732,7 +442,7 @@ function resolvePwsh({ provisioned, bundled, bundledDetail, allowSystemFallback 
     source: 'missing',
     detail: `the plugin carries no PowerShell 7 for this platform${
       bundledDetail === undefined ? '' : ` (${bundledDetail})`
-    }; run \`dsh-ops provision-shells --pwsh\` to install the pinned upstream copy${
+    }; reinstall dsh-ops-lite with optional dependencies enabled on Windows${
       allowSystemFallback
         ? '; the host\'s own pwsh tool is the ladder\'s last rung'
         : '; allowSystemShellFallback is false, so the ladder has no PowerShell rung'}`,
@@ -762,10 +472,8 @@ export function resolveShells(config, options = {}) {
   const allowSystemFallback = config?.allowSystemShellFallback === true
   const probe = { bundleRoot, env, platform, arch }
   const pwshBundled = bundledShell({ kind: 'pwsh', ...probe })
-  const pwshProvisioned = provisionedShell({ kind: 'pwsh', env, platform, arch })
 
   const pwsh = resolvePwsh({
-    provisioned: pwshProvisioned,
     bundled: pwshBundled.file,
     bundledDetail: pwshBundled.detail,
     allowSystemFallback,
@@ -787,10 +495,8 @@ export function resolveShells(config, options = {}) {
   return {
     bash: resolveBash({
       configured: config?.bashPath,
-      provisioned: provisionedShell({ kind: 'bash', env, platform, arch }),
       bundled: bashBundled.file,
       bundledDetail: bashBundled.detail,
-      bundledCause: bashBundled.cause,
       allowSystemFallback,
       env,
       platform,
@@ -1149,8 +855,7 @@ export function bashToolDefinition({ file, source, subprocess, prepareArgv, env 
  * The one remedy two rungs share: the machine's own bash is not a registry
  * artifact, so "fetch it from the registry" is not the advice it needs.
  */
-const SYSTEM_BASH_SPAWN_REMEDY = 'The system bash this deployment fell back to is gone; '
-  + 'reinstall it, or run `dsh-ops provision-shells --bash` for a copy the registry cannot take away.'
+const SYSTEM_BASH_SPAWN_REMEDY = 'The system bash this deployment selected is gone; restore the system Bash executable.'
 
 /**
  * The remedy one ENOENT deserves, chosen by where the executable came from.
@@ -1164,13 +869,8 @@ const SYSTEM_BASH_SPAWN_REMEDY = 'The system bash this deployment fell back to i
  * @type {Readonly<Record<string, string>>}
  */
 const BASH_SPAWN_REMEDY = Object.freeze({
-  'bundled': 'The bundled bash left the profile after it was resolved; restore the profile\'s '
-    + 'dependencies, or run `dsh-ops provision-shells --bash` to fetch the pinned copy from '
-    + 'upstream releases instead.',
-  'provisioned': 'The provisioned copy under this DSH_HOME is gone; run '
-    + '`dsh-ops provision-shells --bash` again to reinstall the pinned upstream copy.',
-  'config': 'The configured bashPath no longer exists; point bashPath at a real executable, or '
-    + 'clear it and run `dsh-ops provision-shells --bash`.',
+  'bundled': 'The bundled bash left the runtime package after resolution; reinstall with optional dependencies enabled.',
+  'config': 'The configured bashPath no longer exists; point bashPath at a real executable.',
   'path': SYSTEM_BASH_SPAWN_REMEDY,
   'well-known': SYSTEM_BASH_SPAWN_REMEDY,
 })

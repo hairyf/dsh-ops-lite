@@ -1,0 +1,2 @@
+# Published runtime receipts verify exact file bytes on every checkout platform.
+dist/** -text

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "dsh-ops-lite",
+    "description": "High-performance Rust file search with compact, token-efficient output."
+  }
+}

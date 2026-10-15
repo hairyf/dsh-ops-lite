@@ -17,6 +17,10 @@
 
 徽章显示各服务的实际状态，不表示包已发布或覆盖率报告已上传。
 
+主包通过 `optionalDependencies` 引用 [Windows x64](<packages/win32-x64/package.json>)、[Linux x64（glibc）](<packages/linux-x64/package.json>)、[macOS arm64](<packages/darwin-arm64/package.json>) 运行时包；包管理器根据 `os` / `cpu` 自动安装匹配的包，不需要安装脚本、Rust 或 MSVC。Windows 包保留完整 Bash、PowerShell 7 和匹配 IPC；Unix 使用系统 Bash。缺少平台包或校验失败会明确报错，不静默退回其他运行时。
+
+`pnpm release` 统一版本并推送 tag，CI 验证三平台后先发布运行时包、再发布主包；首次发布需配置 npm 认证或 Trusted Publisher。
+
 ## 上游
 
 对照源码保留于 [source/dsh-ops](<source/dsh-ops>)，固定提交为 [`6e133320b4f7a81c289e05ff6afddc740cdef36e`](<https://github.com/T-Auto/dsh-ops/commit/6e133320b4f7a81c289e05ff6afddc740cdef36e>)。

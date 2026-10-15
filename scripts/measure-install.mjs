@@ -6,8 +6,8 @@ import path from 'node:path'
 import process from 'node:process'
 
 // Explicit inspection only: npm lifecycle scripts never run; all writes are test-owned.
-const [spec, ...extra] = process.argv.slice(2)
-assert(spec && !extra.length && !spec.startsWith('-'), 'Usage: node scripts/measure-install.mjs <npm-package-spec-or-tarball>')
+const specs = process.argv.slice(2)
+assert(specs.length && specs.every(spec => spec && !spec.startsWith('-')), 'Usage: node scripts/measure-install.mjs <npm-package-spec-or-tarball> [platform-tarball]')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-size-'))
 try {
   const nodeDirectory = path.dirname(process.execPath)
@@ -20,7 +20,7 @@ try {
   fs.mkdirSync(home)
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^DSH_/i.test(key) && !/KEY|PASSWORD|SECRET|TOKEN/i.test(key)))
   Object.assign(env, { HOME: home, USERPROFILE: home, npm_config_cache: path.join(root, 'npm-cache') })
-  const result = spawnSync(process.execPath, [npm, 'install', '--prefix', root, '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', spec], {
+  const result = spawnSync(process.execPath, [npm, 'install', '--prefix', root, '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', ...specs], {
     env,
     stdio: ['ignore', 2, 2],
   })
@@ -64,7 +64,7 @@ try {
     platform: process.platform,
     arch: process.arch,
     node: process.version,
-    spec,
+    specs,
     metric: 'sum of regular-file logical bytes; excludes npm cache, directory/NTFS allocation, links and lockfiles',
     packages,
     totalPackageBytes: Object.values(packages).reduce((total, value) => total + value.bytes, 0),

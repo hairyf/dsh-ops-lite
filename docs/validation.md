@@ -2,7 +2,7 @@
 
 ## 范围
 
-交付必须先满足完整上游能力：普通会话无需保存配置，五个基础工具全部注册并真实执行；后台任务、PTC 与沙箱边界保持上游约束。配置仅保留禁用官方基础工具选项。源码实际维护于本仓库，构建由 tsdown 统一完成。
+交付必须先满足完整上游能力：普通会话无需保存配置，五个基础工具全部注册并真实执行；后台任务、PTC 与沙箱边界保持上游约束。四个组件保持独立配置行；文件组件仅新增默认开启、即时保存的禁用官方基础工具选项。源码实际维护于本仓库，构建由 tsdown 统一完成。
 
 旧提交的 consent-first 分组配置与 `dist/upstream` 包装已经被替换。旧的 5,635,146 字节小包没有提供完整默认运行时，**不作为本次完整 fork 的体积或功能验收结果**。
 
@@ -30,10 +30,24 @@
 pnpm build
 pnpm --config.ignore-scripts=true pack --pack-destination .cache
 node scripts/measure-install.mjs dsh-ops@0.3.0
-node scripts/measure-install.mjs .cache/dsh-ops-lite-0.1.0.tgz
+node build/package-runtime.mjs
+pnpm --filter dsh-ops-lite-win32-x64 --config.ignore-scripts=true pack --pack-destination .cache
+node scripts/measure-install.mjs .cache/dsh-ops-lite-0.1.0.tgz .cache/dsh-ops-lite-win32-x64-0.1.0.tgz
 ```
 
 [测量脚本](<../scripts/measure-install.mjs>) 只创建和删除自己的临时目录；不安装到用户 Harness。Windows-only 上游 payload 的此项比较不能外推为 Unix 数据。
+
+2026-10-15T08:30:00.402Z，当前 npm 分包方案重新执行独立安装，测得：
+
+| 当前安装项 | 版本 | 文件数 | 字节 |
+| --- | --- | ---: | ---: |
+| `dsh-ops-lite` 主包 | 0.1.0 | 27 | 316,162 |
+| `dsh-ops-lite-win32-x64` 完整运行时 | 0.1.0 | 10,301 | 720,521,499 |
+| **当前平台安装合计** | | **10,328** | **720,837,661** |
+
+相比上游基线少 2,868,060 字节（约 **0.396%**）。主包压缩归档为 183,433 字节，SHA-256 `047dd66525dc9ae8cd377c0bbe97625c51241a27a87c0f6f395d67c741f9cd60`；Windows 平台归档为 295,429,835 字节，SHA-256 `b858849571e9830ea6350b59d7d8c4ed2500e59e7e4ed21e4c579ea16e936b21`。这些是实际测量的构建快照，后续 JS 或元数据变化不保证相同归档字节。
+
+npm 仅选择当前平台，不安装其他系统的运行时，无下载器或编译安装脚本。分包并未明显缩减完整 Windows 运行时，**上游 #37 的大体积问题仍未解决**；没有用删除功能换取体积。
 
 ## 检查与 E2E
 

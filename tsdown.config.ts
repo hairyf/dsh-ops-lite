@@ -23,7 +23,9 @@ const common: UserConfig = {
   outExtensions: () => ({ js: '.js' }),
   publint: true,
   deps: { neverBundle: dshExternal },
-  plugins: [StaleGuardRecorder()],
+  // ponytail: freshness covers sources/config; runtime receipts verify payloads.
+  // Enable output hashing when stale-guard bounds its parallel file reads.
+  plugins: [StaleGuardRecorder({ hashOutputs: false })],
 }
 
 export default defineConfig([
@@ -34,7 +36,8 @@ export default defineConfig([
     hooks: { 'build:done': async () => { await buildRuntime() } },
     dts: true,
     sourcemap: false,
-    clean: true,
+    // Rebuild JS without deleting this installation's native runtime.
+    clean: ['dist/*.{js,map,ts}', 'dist/components'],
   },
   {
     ...common,

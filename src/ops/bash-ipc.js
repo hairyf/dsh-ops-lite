@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { patchMsys } from './bash-pe.js'
-import { PACKAGE_ROOT as packageRoot } from './binary.js'
+import { runtimeRoot } from './binary.js'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const cache = new Map()
@@ -25,7 +25,7 @@ export function confinedBash(file, { home = process.env.DSH_HOME ?? path.join(os
   if (!fs.existsSync(dll))
     throw new Error('EXECUTOR_UNAVAILABLE: Windows confined Bash requires the supported MSYS payload layout; no unconfined fallback.')
   const bytes = fs.readFileSync(dll)
-  const proxies = path.join(packageRoot, 'runtime/win32-x64/bash-ipc')
+  const proxies = path.join(runtimeRoot(), 'runtime/win32-x64/bash-ipc')
   const receipt = JSON.parse(fs.readFileSync(path.join(proxies, 'provenance.json'), 'utf8'))
   if (receipt.platform !== 'win32-x64' || receipt.msysSha256 !== hash(bytes))
     throw new Error('EXECUTOR_UNAVAILABLE: This MSYS version has no verified DSH IPC compatibility build. Rebuild the matching proxies; do not bypass confinement.')

@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import manifest from '../../../package.json' with { type: 'json' }
-import { PACKAGE_ROOT } from '../binary.js'
+import { PACKAGE_ROOT, runtimeRoot } from '../binary.js'
 
 export { PACKAGE_ROOT }
-export const PLATFORMS = Object.freeze(['win32-x64', 'linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'])
+export const PLATFORMS = Object.freeze(Object.keys(manifest.optionalDependencies).map(name => name.slice('dsh-ops-lite-'.length)))
 export function workerName(platform = process.platform) {
   return platform === 'win32' ? 'dsh-ops-worker.exe' : 'dsh-ops-worker'
 }
@@ -18,8 +18,7 @@ export function resolveWorker(config = {}, { packageRoot = PACKAGE_ROOT, env = p
   const candidates = explicit !== undefined
     ? [explicit]
     : [
-        path.join(packageRoot, 'runtime', `${platform}-${arch}`, workerName(platform)),
-        path.join(packageRoot, 'native', 'target', 'release', workerName(platform)),
+        path.join(runtimeRoot({ packageRoot, platform, arch }), 'runtime', `${platform}-${arch}`, workerName(platform)),
       ]
   for (const file of candidates) {
     if (!path.isAbsolute(file))

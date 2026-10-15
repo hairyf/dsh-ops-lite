@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -62,8 +63,9 @@ async function stop(child: ChildProcess): Promise<void> {
 async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<void> }> {
   const root = process.env.DSH_E2E_ROOT
   const cli = process.env.DSH_E2E_DSH_BIN
-  assert(root && cli, 'Use node test/e2e/run.mjs; DSH_E2E_DSH_BIN must be an independent temporary installation, with no fallback.')
-  assert(path.isAbsolute(root) && path.isAbsolute(cli), 'Require explicit absolute test paths.')
+  const plugin = process.env.DSH_E2E_PLUGIN_ROOT
+  assert(root && cli && plugin, 'Use pnpm run test:e2e; require an independent CLI and npm-installed packages, with no fallback.')
+  assert(path.isAbsolute(root) && path.isAbsolute(cli) && path.isAbsolute(plugin), 'Require explicit absolute test paths.')
   assert.equal(path.dirname(await realpath(root)), await realpath(tmpdir()), 'Require a test-owned temporary root.')
   assert(path.basename(root).startsWith('dsh-ops-lite-e2e-'))
   const installation = path.join(root, 'installation')
@@ -72,31 +74,29 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   const installed = JSON.parse(await readFile(path.join(installation, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8')) as { version: string }
   assert.equal(installed.version, cliVersion)
   assert.equal(process.env.DSH_E2E_DSH_VERSION, cliVersion)
+  assert.equal(await realpath(plugin), path.join(await realpath(installation), 'node_modules/dsh-ops-lite'), 'Refuse a checkout copy or externally built plugin.')
+  const manifest = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8'))
+  assert.equal(manifest.name, 'dsh-ops-lite')
+  assert.equal(manifest.scripts?.install, undefined, 'The main package must not compile or download runtimes during installation.')
+  const target = `${process.platform}-${process.arch}`
+  const runtimeRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`dsh-ops-lite-${target}/package.json`))
+  assert.equal(await realpath(runtimeRoot), path.join(await realpath(installation), `node_modules/dsh-ops-lite-${target}`))
+  await access(path.join(plugin, 'dist/index.js'))
+  await access(path.join(runtimeRoot, `runtime/${target}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
   const scratch = await mkdtemp(path.join(root, 'host-'))
   const home = path.join(scratch, 'dsh-home')
   const profile = path.join(home, 'profiles/web')
   const workspace = path.join(scratch, 'workspace')
-  const plugin = path.join(scratch, 'plugin')
   // /tmp and os.tmpdir() are writable by the official Unix workspace-write contract.
   // Keep this canary outside those roots, under the checkout's test-owned artifacts.
   await mkdir(path.join(project, 'test-results'), { recursive: true })
   const outsideDirectory = await mkdtemp(path.join(project, 'test-results/e2e-boundary-'))
   const outside = path.join(outsideDirectory, 'canary.txt')
   await writeFile(outside, 'outside-unchanged\n')
-  await mkdir(plugin, { recursive: true })
   await mkdir(workspace, { recursive: true })
   await mkdir(info.outputPath(''), { recursive: true })
-  const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
-  assert.equal(manifest.name, 'dsh-ops-lite', 'Build the final plugin, not the untouched starter.')
-  await access(path.join(project, 'dist/index.js'))
-  await access(path.join(project, `dist/runtime/${process.platform}-${process.arch}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
-  // Copy built plugin only; all SDK imports resolve from this independent CLI tree.
-  await cp(path.join(project, 'dist'), path.join(plugin, 'dist'), { recursive: true })
-  await cp(path.join(project, 'cordis.patch.yml'), path.join(plugin, 'cordis.patch.yml'))
-  await writeFile(path.join(plugin, 'package.json'), JSON.stringify(manifest))
   await mkdir(path.join(profile, 'node_modules'), { recursive: true })
-  // A single SDK identity: the plugin resolves imports through the fresh CLI tree.
-  await symlink(path.join(installation, 'node_modules'), path.join(plugin, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
+  // The installed plugin and CLI share one SDK tree; never copy checkout-built assets.
   await symlink(plugin, path.join(profile, 'node_modules/dsh-ops-lite'), process.platform === 'win32' ? 'junction' : 'dir')
   const token = randomBytes(24).toString('hex')
   const helper = path.join(profile, 'e2e-api.mjs')
