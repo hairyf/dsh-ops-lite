@@ -1,6 +1,7 @@
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ReactElement } from 'react'
 import type { OpsConfig } from '../types'
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Config } from '../config'
 import { CONFIG_ROW_ID, DEFAULT_CONFIG, OFFICIAL_TOOLS } from '../constants'
@@ -51,6 +52,15 @@ beforeEach(() => {
 })
 
 describe('configuration contract', () => {
+  it('keeps the file row package-root discoverable so the settings Switch is mounted', () => {
+    const patch = readFileSync(new URL('../../cordis.patch.yml', import.meta.url), 'utf8')
+    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+    expect(patch.match(/\bid: /g)).toHaveLength(4)
+    expect(patch.replaceAll('\r\n', '\n')).toContain(`- id: ${CONFIG_ROW_ID}\n      name: ${manifest.name}\n`)
+    expect(manifest.exports['./locale/*.json']).toBe(manifest.exports['./file/locale/*.json'])
+    expect(manifest.exports['./icon']).toBe(manifest.exports['./file/icon'])
+  })
+
   it('defaults to enabled in the file-row namespace and preserves explicit false', () => {
     expect(DEFAULT_CONFIG).toEqual({ disableOfficialTools: true })
     expect(Config().get()).toEqual(DEFAULT_CONFIG)

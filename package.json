@@ -21,6 +21,8 @@
     "./file": "./dist/index.js",
     "./background": "./dist/background.js",
     "./ptc": "./dist/ptc.js",
+    "./locale/*.json": "./dist/components/file/locale/*.json",
+    "./icon": "./dist/components/icon.png",
     "./shell/locale/*.json": "./dist/components/shell/locale/*.json",
     "./file/locale/*.json": "./dist/components/file/locale/*.json",
     "./background/locale/*.json": "./dist/components/background/locale/*.json",

@@ -13,7 +13,7 @@ const ptcTools = ['ops_batch', 'ops_result']
 
 async function openSettings(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^(?:Plugins|插件)$/ }).click()
-  await page.getByRole('button', { name: /^(?:View|查看) .*dsh-ops-next/i }).click()
+  await page.getByRole('button', { name: /^(?:View|查看) (?:dsh-ops-next|dsh-ops-file)$/i }).click()
 }
 
 async function reloadSettings(page: Page): Promise<void> {
@@ -93,6 +93,8 @@ test('isolated Harness L2: independent components, immediate policy saving, nati
   await page.getByRole('dialog', { name: 'Preview Notice', exact: true }).getByRole('button', { name: 'Continue', exact: true }).click()
   await page.getByRole('dialog', { name: 'Add an API key to get started', exact: true }).getByRole('button', { name: 'Configure later', exact: true }).click()
   await openSettings(page)
+  await expect(page.getByRole('switch', { name: '禁用官方基础工具', exact: true })).toBeChecked()
+  await page.screenshot({ path: info.outputPath('default-policy-switch.png') })
 
   await test.step('four real component entries expose their upstream defaults and enable optional runtimes', async () => {
     await expect(component(page, 'dsh-ops-bash & powershell 7')).toBeChecked()
