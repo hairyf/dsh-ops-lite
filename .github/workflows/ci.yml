@@ -88,13 +88,29 @@ jobs:
           node build/package-runtime.mjs
           OUT="$(node -p 'require("node:path").resolve(".cache/package")')"
           pnpm --filter "@dshopslite/$TARGET" --config.ignore-scripts=true pack --pack-destination "$OUT"
+      - name: Pack both independently versioned Windows shell payloads
+        if: runner.os == 'Windows'
+        run: |
+          OUT="$(node -p 'require("node:path").resolve(".cache/package")')"
+          for KIND in bash pwsh; do
+            pnpm --filter "@dshopslite/win32-x64-$KIND" --config.ignore-scripts=true pack --pack-destination "$OUT"
+          done
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: shell-payload-packages-win32-x64
+          path: |
+            .cache/package/dshopslite-win32-x64-bash-*.tgz
+            .cache/package/dshopslite-win32-x64-pwsh-*.tgz
+          if-no-files-found: error
+          retention-days: 7
       - name: Pack the portable main package once without rerunning prepack
         if: runner.os == 'Linux'
         run: pnpm --config.ignore-scripts=true pack --pack-destination .cache/package
       - uses: actions/upload-artifact@v4
         with:
           name: platform-package-${{ matrix.target }}
-          path: .cache/package/dshopslite-${{ matrix.target }}-*.tgz
+          path: .cache/package/dshopslite-${{ matrix.target }}-[0-9]*.tgz
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
@@ -148,6 +164,11 @@ jobs:
         with:
           name: platform-package-${{ matrix.target }}
           path: .cache/package
+      - uses: actions/download-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: shell-payload-packages-win32-x64
+          path: .cache/package
       - name: Install Chromium and its system dependencies
         run: pnpm exec playwright install --with-deps chromium
       - name: Install the matching platform tarball and the same main tarball, then exercise every real L2 assertion
@@ -156,6 +177,10 @@ jobs:
         run: |
           export DSH_E2E_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dsh-ops-lite-"+require("./package.json").version+".tgz")')"
           export DSH_E2E_PLATFORM_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dshopslite-"+process.env.TARGET+"-"+require("./package.json").version+".tgz")')"
+          if [[ "$TARGET" == win32-x64 ]]; then
+            export DSH_E2E_BASH_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dshopslite-win32-x64-bash-"+require("./packages/win32-x64-bash/package.json").version+".tgz")')"
+            export DSH_E2E_PWSH_TARBALL="$(node -p 'require("node:path").resolve(".cache/package/dshopslite-win32-x64-pwsh-"+require("./packages/win32-x64-pwsh/package.json").version+".tgz")')"
+          fi
           pnpm run test:e2e
       - name: Upload installation evidence, browser traces and real host logs
         if: always()

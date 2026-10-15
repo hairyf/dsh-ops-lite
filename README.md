@@ -12,14 +12,17 @@
 基于 [T-Auto/dsh-ops](<https://github.com/T-Auto/dsh-ops>) fork，仅新增以下改动：
 
 - **多平台适配**：支持 Windows、macOS、Linux 的平台原生运行时构建。
+- **按需 Shell 载荷**：Windows 平台包不再默认携带 Bash / PowerShell；安装期优先复用本地 Shell，仅缺失时通过 npm 补齐，运行时不下载。详见[安装与修复](<docs/shell-payloads.md>)。
 - **多平台 E2E 测试**：[CI](<https://github.com/hairyf/dsh-ops-lite/actions/workflows/ci.yml>) 配置 Windows、macOS、Linux 的真实隔离 Harness + Playwright 测试。
 - **禁用官方基础工具配置**：默认开启，切换即保存。开启后禁用官方基础文件与 Shell 工具，保留 read_image，不改变权限或沙箱。
 
 徽章显示各服务的实际状态，不表示包已发布或覆盖率报告已上传。
 
-主包通过 `optionalDependencies` 引用 `@dshopslite/*` 运行时包：[Windows x64](<packages/win32-x64/package.json>)、[Linux x64（glibc）](<packages/linux-x64/package.json>)、[macOS arm64](<packages/darwin-arm64/package.json>)；包管理器根据 `os` / `cpu` 自动安装匹配的包，不需要安装脚本、Rust 或 MSVC。Windows 包默认保留完整 Bash、PowerShell 7 和匹配 IPC；Unix 使用系统 Bash。缺少平台包或校验失败会明确报错，不静默退回其他运行时。
+主包通过 `optionalDependencies` 引用 `@dshopslite/*` 运行时包：[Windows x64](<packages/win32-x64/package.json>)、[Linux x64（glibc）](<packages/linux-x64/package.json>)、[macOS arm64](<packages/darwin-arm64/package.json>)；包管理器根据 `os` / `cpu` 自动安装匹配的原生 worker、FastCtx 与 IPC，不需要 Rust 或 MSVC。Windows Shell 拆到独立的 [Bash 包](<packages/win32-x64-bash/package.json>)和 [PowerShell 包](<packages/win32-x64-pwsh/package.json>)，不是主包依赖；Unix 使用系统 Bash。
 
-`pnpm release` 统一版本并推送 tag，CI 验证三平台后先发布运行时包、再发布主包；首次发布需配置 npm 认证或 Trusted Publisher。
+Windows x64 的 `postinstall` 在安装期检查本地 Shell 版本与 Bash IPC 兼容性，并通过 npm 安装缺失或不兼容的项。pnpm / DSH 插件管理器阻止构建脚本时，需要明确批准主包脚本；跳过脚本就不会补齐载荷。下载或校验失败会打印警告但不阻止主包安装，运行时缺失能力明确报错，不后台下载或绕过沙箱。已有本地 Shell 的执行仍需 `bashPath` 或 `allowSystemShellFallback` 授权。
+
+`pnpm release` 统一主包与三个平台包版本；Shell 载荷按上游 pin 独立版本，仅首次发布该 pin。CI 验证三平台后先发布载荷与运行时包、再发布主包；首次发布需配置 npm 认证或 Trusted Publisher。
 
 ## 上游
 

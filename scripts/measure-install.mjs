@@ -65,7 +65,8 @@ try {
     arch: process.arch,
     node: process.version,
     specs,
-    metric: 'sum of regular-file logical bytes; excludes npm cache, directory/NTFS allocation, links and lockfiles',
+    lifecycleScripts: false,
+    metric: 'base package installation with scripts disabled; sum of regular-file logical bytes; excludes optional managed shell store, npm cache, directory/NTFS allocation, links and lockfiles',
     packages,
     totalPackageBytes: Object.values(packages).reduce((total, value) => total + value.bytes, 0),
   }, null, 2))

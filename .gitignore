@@ -11,6 +11,7 @@ dist/vendor
 packages/*/runtime
 packages/*/vendor
 packages/*/licenses
+packages/*/payload.json
 lib-cov
 logs
 node_modules

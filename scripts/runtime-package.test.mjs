@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
@@ -5,12 +7,15 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import vm from 'node:vm'
 import { loadBumpConfig, versionBump } from 'bumpp'
 import { expect, it, vi } from 'vitest'
+import { prepareRuntimePackages } from '../build/package-runtime.mjs'
 import bumpConfig, { syncNativeVersion } from '../bump.config.ts'
 import manifest from '../package.json' with { type: 'json' }
 import { executableName, resolveBinary, runtimeRoot } from '../src/ops/binary.js'
 import { resolveWorker, workerName } from '../src/ops/ptc/runtime.js'
+import * as shellPayloads from '../src/ops/shell-payloads.js'
 import { bundledShellPath } from '../src/ops/shells.js'
 
 vi.mock('node:child_process', () => ({ spawnSync: vi.fn() }))
@@ -18,11 +23,12 @@ vi.mock('node:child_process', () => ({ spawnSync: vi.fn() }))
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value))
 
-it('loads the release configuration and bumps every package and native crate together without release side effects', async () => {
+it('bumps only main, native platform packages and native crate, leaving shell payload pins unchanged', async () => {
   const root = fileURLToPath(new URL('..', import.meta.url))
   const config = await loadBumpConfig(undefined, root)
   const packageFiles = ['package.json', ...['win32-x64', 'linux-x64', 'darwin-arm64'].map(target => `packages/${target}/package.json`)]
-  const files = [...packageFiles, 'native/Cargo.toml', 'native/Cargo.lock']
+  const payloadFiles = shellPayloads.SHELL_UPSTREAM_PINS.map(pin => `packages/win32-x64-${pin.name}/package.json`)
+  const files = [...packageFiles, ...payloadFiles, 'native/Cargo.toml', 'native/Cargo.lock']
   const originals = new Map(files.map(file => [file, fs.readFileSync(path.join(root, file), 'utf8')]))
   const temporary = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-release-')))
   try {
@@ -57,6 +63,8 @@ it('loads the release configuration and bumps every package and native crate tog
       for (const file of packageFiles) {
         expect(JSON.parse(fs.readFileSync(path.join(temporary, file), 'utf8'))).toEqual({ ...JSON.parse(originals.get(file)), version: nextVersion })
       }
+      for (const file of payloadFiles)
+        expect(fs.readFileSync(path.join(temporary, file), 'utf8')).toBe(originals.get(file))
       for (const file of ['native/Cargo.toml', 'native/Cargo.lock']) {
         const updated = fs.readFileSync(path.join(temporary, file), 'utf8')
         expect(updated.match(/name = "dsh-ops-core"\r?\nversion = "([^"]+)"/)?.[1]).toBe(nextVersion)
@@ -187,8 +195,8 @@ it('declares exact scoped platform dependencies and executable Unix runtimes', (
     const metadata = JSON.parse(fs.readFileSync(file, 'utf8'))
     expect(metadata).toMatchObject({ name: `@dshopslite/${target}`, version: manifest.version, os: [platform], cpu: [arch] })
     if (platform === 'win32') {
-      expect(metadata.files).toEqual(['licenses', 'runtime', 'vendor'])
-      expect(metadata.license).toContain('GPL-2.0-only')
+      expect(metadata.files).toEqual(['licenses', 'runtime'])
+      expect(metadata.license).not.toContain('GPL-2.0-only')
     }
     // Unix consumers execute these directly; the E2E checks their packed modes.
     else {
@@ -197,6 +205,148 @@ it('declares exact scoped platform dependencies and executable Unix runtimes', (
         `./runtime/${target}/${executableName(platform)}`,
       ])
     }
+  }
+})
+
+it('runs the release workflow guard against exact artifacts and fails closed on unknown registry responses', async () => {
+  const workflow = fs.readFileSync(fileURLToPath(new URL('../.github/workflows/release.yml', import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+  const script = workflow.split('node --input-type=module <<\'NODE\'\n')[1].split('\n          NODE')[0].replace(/^ {10}/gm, '').replace(/^import .*\n/gm, '')
+  const execute = vm.compileFunction(`return (async () => {\n${script}\n})()`, ['assert', 'execFileSync', 'readFileSync', 'readdirSync', 'writeFileSync', 'payloadExecutable', 'SHELL_UPSTREAM_PINS', 'process', 'fetch', 'AbortSignal', 'console', 'createHash', 'mkdirSync'])
+  const pins = shellPayloads.SHELL_UPSTREAM_PINS.map(pin => ({ ...pin, executableSha256: createHash('sha256').update(`exe-${pin.name}`).digest('hex'), msysSha256: createHash('sha256').update('msys').digest('hex') }))
+  const packages = [
+    ...pins.map(pin => ({ name: pin.payloadPackage, version: pin.payloadVersion, pin })),
+    ...['@dshopslite/win32-x64', '@dshopslite/linux-x64', '@dshopslite/darwin-arm64', 'dsh-ops-lite'].map(name => ({ name, version: manifest.version })),
+  ].map(item => ({ ...item, file: `npm-packages/${item.name.replace(/^@/, '').replace('/', '-')}-${item.version}.tgz` }))
+  const run = async ({ status = () => 404, corrupt = false, extra = false, existingIdentity = false, existingBytes = false } = {}) => {
+    const write = vi.fn()
+    const fetch = vi.fn(async (url) => {
+      const item = packages.find(item => url.endsWith(`${encodeURIComponent(item.name)}/${item.version}`))
+      expect(item).toBeDefined()
+      return { status: status(item), json: async () => ({ name: existingIdentity ? 'wrong-name' : item.name, version: item.version }) }
+    })
+    const command = (file, args) => {
+      if (file === 'npm') {
+        expect(args).toEqual(['pack', expect.stringContaining('@dshopslite/win32-x64-'), '--registry=https://registry.npmjs.org', '--ignore-scripts', '--pack-destination', 'npm-existing-payloads'])
+        return
+      }
+      expect(file).toBe('tar')
+      const item = packages.find(item => path.posix.basename(item.file) === path.posix.basename(args[1]))
+      if (args[2].endsWith('.exe'))
+        return Buffer.from(existingBytes && args[1].startsWith('npm-existing-payloads/') ? 'tampered' : `exe-${item.pin.name}`)
+      if (args[2].endsWith('.dll'))
+        return Buffer.from('msys')
+      expect(item).toBeDefined()
+      if (args[2] === 'package/payload.json') {
+        const { pin } = item
+        return JSON.stringify({ kind: pin.name, target: 'win32-x64', version: pin.payloadVersion, executable: shellPayloads.payloadExecutable(pin), sha256: pin.executableSha256 })
+      }
+      return JSON.stringify({ name: item.name, version: corrupt && item.pin ? '0.0.0' : item.version, ...(item.pin ? { os: ['win32'], cpu: ['x64'] } : {}) })
+    }
+    const promise = execute(assert, command, () => JSON.stringify(manifest), () => [...packages.map(item => path.posix.basename(item.file)), ...(extra ? ['unexpected.tgz'] : [])], write, shellPayloads.payloadExecutable, pins, { env: { RELEASE_TAG: `v${manifest.version}` } }, fetch, AbortSignal, { log() {} }, createHash, vi.fn())
+    return { promise, write, fetch }
+  }
+  for (const skipPins of [false, true]) {
+    const { promise, write, fetch } = await run({ status: item => skipPins && item.pin ? 200 : 404 })
+    await promise
+    expect(fetch).toHaveBeenCalledTimes(6)
+    expect(write).toHaveBeenCalledWith('npm-publish-files.txt', `${packages.filter(item => !skipPins || !item.pin).map(item => item.file).join('\n')}\n`)
+  }
+  for (const status of [200, 401, 429, 500]) {
+    const { promise, write } = await run({ status: item => item.pin && status === 200 ? 404 : status })
+    await expect(promise).rejects.toThrow('Refuse to overwrite')
+    expect(write).not.toHaveBeenCalled()
+  }
+  for (const invalid of [{ corrupt: true }, { extra: true }]) {
+    const { promise, write, fetch } = await run(invalid)
+    await expect(promise).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+  }
+  for (const invalid of [{ existingIdentity: true }, { existingBytes: true }]) {
+    const { promise, write } = await run({ ...invalid, status: item => item.pin ? 200 : 404 })
+    await expect(promise).rejects.toThrow()
+    expect(write).not.toHaveBeenCalled()
+  }
+  expect(workflow).toContain('npm publish "./$FILE" --provenance --access public --ignore-scripts')
+})
+
+it('declares independent upstream-pin shell packages with no install scripts or default dependencies', () => {
+  for (const pin of shellPayloads.SHELL_UPSTREAM_PINS) {
+    const file = fileURLToPath(new URL(`../packages/win32-x64-${pin.name}/package.json`, import.meta.url))
+    const metadata = JSON.parse(fs.readFileSync(file, 'utf8'))
+    expect(metadata).toMatchObject({ name: pin.payloadPackage, version: pin.payloadVersion, os: ['win32'], cpu: ['x64'], files: ['licenses', 'payload.json', 'vendor'] })
+    expect(metadata.scripts).toBeUndefined()
+    expect(manifest.optionalDependencies).not.toHaveProperty(pin.payloadPackage)
+  }
+  expect(shellPayloads.shellUpstreamPin({ kind: 'bash', platform: 'win32', arch: 'x64' }).payloadVersion).toBe('2.56.0-windows.2')
+})
+
+it('stages verified shell payloads separately while preserving native and IPC provenance guards', () => {
+  const source = fileURLToPath(new URL('..', import.meta.url))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-stage-')))
+  const target = 'win32-x64'
+  const dist = path.join(root, 'dist')
+  const options = { root, platform: 'win32', arch: 'x64' }
+  const lookup = vi.spyOn(shellPayloads, 'shellUpstreamPin')
+  try {
+    for (const file of ['package.json', ...[target, `${target}-bash`, `${target}-pwsh`].map(name => `packages/${name}/package.json`)]) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+      fs.copyFileSync(path.join(source, file), path.join(root, file))
+    }
+    const native = fixture(dist, target)
+    fs.mkdirSync(path.join(dist, 'licenses'))
+    fs.writeFileSync(path.join(dist, 'licenses/NOTICE'), 'runtime license')
+    const pins = shellPayloads.SHELL_UPSTREAM_PINS.map(pin => ({ ...pin }))
+    for (const pin of pins) {
+      const executable = path.join(dist, 'vendor', pin.name, target, pin.name === 'bash' ? 'bin/bash.exe' : 'pwsh.exe')
+      fs.mkdirSync(path.dirname(executable), { recursive: true })
+      fs.writeFileSync(executable, `synthetic-${pin.name}`)
+      pin.executableSha256 = digest(executable)
+    }
+    lookup.mockImplementation(({ kind }) => pins.find(pin => pin.name === kind))
+    const msys = path.join(dist, 'vendor/bash', target, 'usr/bin/msys-2.0.dll')
+    fs.mkdirSync(path.dirname(msys), { recursive: true })
+    fs.writeFileSync(msys, 'synthetic-msys')
+    pins[0].msysSha256 = digest(msys)
+    const proxies = path.join(dist, 'runtime', target, 'bash-ipc')
+    fs.mkdirSync(proxies)
+    for (const name of ['opsipc.dll', 'opsnt.dll']) fs.writeFileSync(path.join(proxies, name), name)
+    const receipt = { platform: target, msysSha256: digest(msys), files: Object.fromEntries(['opsipc.dll', 'opsnt.dll'].map(name => [name, digest(path.join(proxies, name))])) }
+    const receiptFile = path.join(proxies, 'provenance.json')
+    json(receiptFile, receipt)
+    const stale = path.join(root, 'packages', target, 'vendor/stale')
+    fs.mkdirSync(stale, { recursive: true })
+    prepareRuntimePackages(options)
+    expect(fs.existsSync(path.dirname(stale))).toBe(false)
+    expect(fs.readFileSync(path.join(root, 'packages', target, 'runtime', target, 'dsh-ops-worker.exe'))).toEqual(fs.readFileSync(native.worker))
+    for (const pin of pins) {
+      const output = path.join(root, 'packages', `${target}-${pin.name}`)
+      const metadata = JSON.parse(fs.readFileSync(path.join(output, 'payload.json'), 'utf8'))
+      expect(metadata).toEqual({ kind: pin.name, target, version: pin.payloadVersion, executable: `vendor/${pin.name}/${target}/${pin.name === 'bash' ? 'bin/bash.exe' : 'pwsh.exe'}`, sha256: pin.executableSha256 })
+      expect(digest(path.join(output, metadata.executable))).toBe(pin.executableSha256)
+      expect(fs.existsSync(path.join(output, 'vendor', pin.name === 'bash' ? 'pwsh' : 'bash'))).toBe(false)
+      expect(fs.readFileSync(path.join(output, 'licenses/NOTICE'), 'utf8')).toBe('runtime license')
+    }
+    json(receiptFile, { ...receipt, msysSha256: '0'.repeat(64) })
+    expect(() => prepareRuntimePackages(options)).toThrow('Bash IPC MSYS provenance mismatch')
+    json(receiptFile, { ...receipt, files: { ...receipt.files, 'opsipc.dll': '0'.repeat(64) } })
+    expect(() => prepareRuntimePackages(options)).toThrow('Bash IPC provenance mismatch: opsipc.dll')
+    json(receiptFile, receipt)
+    const pin = pins[0]
+    pin.msysSha256 = '0'.repeat(64)
+    expect(() => prepareRuntimePackages(options)).toThrow('Bash IPC MSYS provenance mismatch')
+    pin.msysSha256 = digest(msys)
+    const original = pin.executableSha256
+    pin.executableSha256 = '0'.repeat(64)
+    expect(() => prepareRuntimePackages(options)).toThrow('Pinned bash executable mismatch')
+    pin.executableSha256 = original
+    const file = path.join(root, 'packages', `${target}-bash`, 'package.json')
+    json(file, { ...JSON.parse(fs.readFileSync(file, 'utf8')), version: '0.0.0' })
+    expect(() => prepareRuntimePackages(options)).toThrow('Shell payload package does not match the pin: bash')
+  }
+  finally {
+    lookup.mockRestore()
+    fs.rmSync(root, { recursive: true, force: true })
   }
 })
 

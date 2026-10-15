@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { SHELL_UPSTREAM_PINS } from '../../src/ops/shell-payloads.js'
 
 // Test actual npm tarballs and a fresh CLI, never checkout assets or a user Harness.
 async function main() {
@@ -21,7 +24,11 @@ async function main() {
   const keepTemp = process.env.DSH_E2E_KEEP_TMP === '1' && !process.env.CI
   let tarball = process.env.DSH_E2E_TARBALL
   let platformTarball = process.env.DSH_E2E_PLATFORM_TARBALL
+  const shellTarballs = { bash: process.env.DSH_E2E_BASH_TARBALL, pwsh: process.env.DSH_E2E_PWSH_TARBALL }
+  const shellPins = process.platform === 'win32' ? SHELL_UPSTREAM_PINS : []
   assert.equal(Boolean(tarball), Boolean(platformTarball), 'Supply both DSH_E2E_TARBALL and DSH_E2E_PLATFORM_TARBALL, or pack the already-built workspace.')
+  for (const pin of shellPins)
+    assert.equal(Boolean(shellTarballs[pin.name]), Boolean(tarball), 'On Windows also supply DSH_E2E_BASH_TARBALL and DSH_E2E_PWSH_TARBALL, or pack all four packages locally.')
   console.warn(`Independent Harness test directory: ${root}`)
   const nodeDirectory = path.dirname(process.execPath)
   const npmCandidates = [
@@ -34,6 +41,7 @@ async function main() {
   Object.assign(env, {
     DSH_E2E_ROOT: root,
     DSH_E2E_DSH_VERSION: version,
+    DSH_HOME: path.join(root, 'dsh-home'),
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(root, 'browsers'),
     HOME: home,
     USERPROFILE: home,
@@ -55,9 +63,9 @@ async function main() {
   installEnv.PATH = process.platform === 'win32' ? `${nodeDirectory}${path.delimiter}${path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32')}` : nodeDirectory
   installEnv.npm_config_script_shell = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32/cmd.exe') : '/bin/sh'
 
-  function run(argv, { capture = false, executable = process.execPath, childEnv = env } = {}) {
+  function run(argv, { capture = false, executable = process.execPath, childEnv = env, cwd = project } = {}) {
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, argv, { cwd: project, env: childEnv, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: process.platform !== 'win32' })
+      const child = spawn(executable, argv, { cwd, env: childEnv, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: process.platform !== 'win32' })
       let output = ''
       let errors = ''
       child.stdout?.on('data', chunk => output += chunk.toString())
@@ -88,16 +96,18 @@ async function main() {
       assert(pnpm && /pnpm/i.test(pnpm), 'Use pnpm run test:e2e after building/staging the platform package, or supply both tarball paths.')
       const packages = path.join(root, 'packages')
       await mkdir(packages)
-      for (const filter of [[], ['--filter', `@dshopslite/${target}`]]) {
+      for (const filter of [[], ['--filter', `@dshopslite/${target}`], ...shellPins.map(pin => ['--filter', pin.payloadPackage])]) {
         const args = [...filter, '--config.ignore-scripts=true', 'pack', '--pack-destination', packages]
         await run(/\.[cm]?js$/.test(pnpm) ? [pnpm, ...args] : args, { executable: /\.[cm]?js$/.test(pnpm) ? process.execPath : pnpm })
       }
       const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
       tarball = path.join(packages, `dsh-ops-lite-${manifest.version}.tgz`)
       platformTarball = path.join(packages, `dshopslite-${target}-${manifest.version}.tgz`)
+      for (const pin of shellPins)
+        shellTarballs[pin.name] = path.join(packages, `${pin.payloadPackage.slice(1).replace('/', '-')}-${pin.payloadVersion}.tgz`)
     }
     const inspected = []
-    for (const [file, name] of [[tarball, 'dsh-ops-lite'], [platformTarball, `@dshopslite/${target}`]]) {
+    for (const [file, name, pin] of [[tarball, 'dsh-ops-lite'], [platformTarball, `@dshopslite/${target}`], ...shellPins.map(pin => [shellTarballs[pin.name], pin.payloadPackage, pin])]) {
       assert(path.isAbsolute(file) && file.endsWith('.tgz'), 'Require explicit absolute npm tarball paths.')
       await access(file)
       const [packed] = JSON.parse(await run([npmCli, 'pack', file, '--dry-run', '--ignore-scripts', '--json'], { capture: true }))
@@ -115,8 +125,21 @@ async function main() {
         }
       }
       for (const lifecycle of ['preinstall', 'install', 'postinstall'])
-        assert.equal(manifest.scripts?.[lifecycle], undefined, `${name} must not need an installer or compilation hook.`)
+        assert.equal(manifest.scripts?.[lifecycle], name === 'dsh-ops-lite' && lifecycle === 'postinstall' ? 'node scripts/provision-shells.mjs --postinstall' : undefined, `${name} permits only the main package's shell-provisioning postinstall, never a compilation hook.`)
       assert.deepEqual(manifest.dependencies ?? {}, {}, `${name} must not add external runtime JavaScript dependencies.`)
+      if (pin) {
+        assert.equal(manifest.version, pin.payloadVersion)
+        assert.deepEqual(manifest.os, ['win32'])
+        assert.deepEqual(manifest.cpu, ['x64'])
+        assert.deepEqual(manifest.optionalDependencies ?? {}, {})
+        const payload = JSON.parse(await run(['-xOf', file, 'package/payload.json'], { executable: tar, capture: true }))
+        const executable = `vendor/${pin.name}/win32-x64/${pin.name === 'bash' ? 'bin/bash.exe' : 'pwsh.exe'}`
+        assert.deepEqual(payload, { kind: pin.name, target: 'win32-x64', version: pin.payloadVersion, executable, sha256: pin.executableSha256 })
+        const payloadFiles = packed.files.map(file => file.path)
+        assert(payloadFiles.includes(executable), `${name} must include its real executable.`)
+        assert(payloadFiles.some(file => file.startsWith('licenses/')), `${name} must retain its licenses.`)
+        assert(!payloadFiles.some(file => !['package.json', 'payload.json', 'README.md', 'LICENSE'].includes(file) && !file.startsWith('licenses/') && !file.startsWith(`vendor/${pin.name}/win32-x64/`)), `${name} must contain only its own shell payload and metadata.`)
+      }
       inspected.push({ ...packed, manifest, tarballSha256: await sha256(file) })
     }
     const [packed, platformPacked] = inspected
@@ -124,13 +147,16 @@ async function main() {
     assert.deepEqual(platformPacked.manifest.os, [process.platform])
     assert.deepEqual(platformPacked.manifest.cpu, [process.arch])
     assert.deepEqual(packed.manifest.optionalDependencies, Object.fromEntries(targets.map(target => [`@dshopslite/${target}`, packed.version])))
+    assert.deepEqual(Object.keys(packed.manifest.bin), ['dsh-ops-provision-shells'])
+    assert.equal(packed.manifest.bin['dsh-ops-provision-shells'].replace(/^\.\//, ''), 'scripts/provision-shells.mjs')
     const files = packed.files.map(file => file.path)
-    assert(!files.some(file => /^(?:build\/|dist\/(?:runtime|vendor|licenses)(?:\/|$)|\.cache\/|node_modules\/|native\/|vendor\/|src\/|bin\/)|\/(?:target|node_modules)\//.test(file) || file === 'runtime-manifest.json'), 'The main package must contain no native payloads, installer, source-build inputs or caches.')
-    for (const required of ['dist/index.js', 'dist/client.js', 'dist/shell.js', 'dist/background.js', 'dist/ptc.js', 'dist/prepare-workspace.ps1', 'cordis.patch.yml'])
+    const installerFiles = ['scripts/provision-shells.mjs', 'src/ops/shell-payloads.js', 'src/ops/provision.js']
+    assert(!files.some(file => !installerFiles.includes(file) && (/^(?:build\/|dist\/(?:runtime|vendor|licenses)(?:\/|$)|\.cache\/|node_modules\/|native\/|vendor\/|src\/|scripts\/|bin\/)|\/(?:target|node_modules)\//.test(file) || file === 'runtime-manifest.json')), 'The main package permits only the explicit provisioning sources, never native payloads, other installers, source-build inputs or caches.')
+    for (const required of ['dist/index.js', 'dist/client.js', 'dist/shell.js', 'dist/background.js', 'dist/ptc.js', 'dist/prepare-workspace.ps1', 'cordis.patch.yml', ...installerFiles])
       assert(files.includes(required), `Main package is missing ${required}`)
     const platformFiles = platformPacked.files.map(file => file.path)
     assert(platformFiles.some(file => file.startsWith('licenses/')), 'Platform package must retain its runtime licenses.')
-    assert(!platformFiles.some(file => /^(?:src|native|build|node_modules)\//.test(file)), 'Platform package must not contain source-build inputs.')
+    assert(!platformFiles.some(file => /^(?:src|native|build|node_modules|scripts|vendor)\//.test(file)), 'Platform package must not contain shell vendors, installers or source-build inputs.')
     for (const other of targets.filter(other => other !== target))
       assert(!platformFiles.some(file => file.startsWith(`runtime/${other}/`) || file.startsWith(`vendor/bash/${other}/`) || file.startsWith(`vendor/pwsh/${other}/`)), 'Package only this runner\'s actual OS/CPU assets.')
     console.warn(`Main package: ${packed.filename}, ${packed.size} bytes, SHA256 ${packed.tarballSha256}`)
@@ -182,6 +208,80 @@ async function main() {
       assert.equal(output, `${name} ${binaryVersion}`)
       evidence.runtimes.push({ ...receipt, versionOutput: output })
       console.warn(`Installed ${target}: ${output}; SHA256 ${receipt.sha256}`)
+    }
+    if (shellPins.length) {
+      const payloads = await import(pathToFileURL(path.join(plugin, 'src/ops/shell-payloads.js')).href)
+      assert.deepEqual(payloads.SHELL_UPSTREAM_PINS, SHELL_UPSTREAM_PINS, 'Test the installed shared pins, not a checkout runtime.')
+      const requests = []
+      let registryUrl
+      const registry = createServer((request, response) => {
+        const route = (request.url ?? '').replace(/%2f/gi, '/')
+        requests.push(`${request.method} ${route}`)
+        const pin = shellPins.find(pin => route === `/${pin.payloadPackage}` || route === `/${pin.name}.tgz`)
+        if (request.method !== 'GET' || !pin) {
+          response.writeHead(404).end()
+          return
+        }
+        if (route === `/${pin.name}.tgz`) {
+          response.setHeader('content-type', 'application/octet-stream')
+          createReadStream(shellTarballs[pin.name]).on('error', error => response.destroy(error)).pipe(response)
+          return
+        }
+        const packed = inspected.find(packed => packed.name === pin.payloadPackage)
+        const metadata = { ...packed.manifest, dist: { tarball: `${registryUrl}/${pin.name}.tgz`, integrity: packed.integrity } }
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ 'name': pin.payloadPackage, 'dist-tags': { latest: pin.payloadVersion }, 'versions': { [pin.payloadVersion]: metadata } }))
+      })
+      await new Promise((resolve, reject) => {
+        registry.once('error', reject)
+        registry.listen(0, '127.0.0.1', resolve)
+      })
+      const address = registry.address()
+      assert(address && typeof address === 'object')
+      registryUrl = `http://127.0.0.1:${address.port}`
+      console.warn('Running the installed main postinstall against a test-owned registry, with no checkout dependencies or compiler tools.')
+      const provisionEnv = { ...installEnv, DSH_OPS_FORCE_MANAGED_SHELLS: '1', npm_config_registry: registryUrl, npm_config_cache: path.join(root, 'provision-npm-cache'), npm_config_offline: 'false' }
+      try {
+        for (const pin of shellPins) {
+          await assert.rejects(access(payloads.managedShellDirectory({ kind: pin.name, env: provisionEnv })), { code: 'ENOENT' }, 'The installer must fetch into a fresh managed store, not adopt preseeded payloads.')
+          assert.equal(payloads.managedShell({ kind: pin.name, env: provisionEnv }), undefined)
+        }
+        await run([npmCli, 'run', 'postinstall', '--ignore-scripts=false', '--workspaces=false'], { childEnv: provisionEnv, cwd: plugin })
+        for (const pin of shellPins) {
+          assert(requests.includes(`GET /${pin.payloadPackage}`), `npm must fetch exact ${pin.payloadPackage} metadata.`)
+          assert(requests.includes(`GET /${pin.name}.tgz`), `npm must fetch the inspected ${pin.name} tarball.`)
+          assert.equal(payloads.managedShell({ kind: pin.name, env: provisionEnv })?.source, 'provisioned', 'The postinstall itself must finish verified provisioning before manual repair runs.')
+        }
+        const fetched = [...requests]
+        // Repair must reuse the freshly installed generations without any HTTP, even offline.
+        await run([path.join(plugin, installed.bin['dsh-ops-provision-shells'])], { childEnv: { ...provisionEnv, npm_config_offline: 'true' }, cwd: home })
+        assert.deepEqual(requests, fetched, 'Offline manual repair must not make registry requests.')
+        evidence.shellRegistryRequests = fetched
+        evidence.offlineShellRepairReused = true
+      }
+      finally {
+        await new Promise((resolve, reject) => registry.close(error => error ? reject(error) : resolve()))
+      }
+      evidence.shells = []
+      for (const pin of shellPins) {
+        const directory = payloads.managedShellDirectory({ kind: pin.name, env: installEnv })
+        const payloadRoot = path.join(directory, 'node_modules', pin.payloadPackage)
+        const shellPacked = inspected.find(packed => packed.name === pin.payloadPackage)
+        assert.deepEqual(JSON.parse(await readFile(path.join(payloadRoot, 'package.json'), 'utf8')), shellPacked.manifest, 'The real installer must install the exact inspected shell tarball.')
+        assert.equal(await realpath(payloadRoot), payloadRoot, 'Shell payloads must be npm-installed, not checkout links.')
+        const receipt = JSON.parse(await readFile(path.join(directory, '.provisioned.json'), 'utf8'))
+        assert.deepEqual(receipt, { kind: pin.name, target, version: pin.payloadVersion, source: 'payload', sha256: pin.executableSha256 })
+        const resolved = payloads.managedShell({ kind: pin.name, env: installEnv })
+        assert.equal(resolved?.source, 'provisioned', 'Both installed shells must resolve from the verified managed store, never a system installation.')
+        assert.equal(await sha256(resolved.file), pin.executableSha256)
+        const output = (await run(['--version'], { executable: resolved.file, capture: true, childEnv: installEnv, cwd: home })).trim()
+        if (pin.name === 'bash')
+          assert.match(output, /^GNU bash, version \d+\.\d+/)
+        else assert.equal(output, `PowerShell ${pin.version}`)
+        evidence.shells.push({ ...receipt, resolutionSource: resolved.source, executable: resolved.file, tarball: shellPacked.filename, tarballSha256: shellPacked.tarballSha256, packageBytes: shellPacked.size, versionOutput: output })
+        console.warn(`Provisioned ${pin.name}: ${output.split('\n')[0]}; SHA256 ${receipt.sha256}`)
+      }
+      env.DSH_E2E_SHELL_STORE = payloads.shellStoreRoot({ env: installEnv })
     }
     env.DSH_E2E_PLUGIN_ROOT = plugin
     const report = path.join(project, 'test-results/e2e-installation.json')

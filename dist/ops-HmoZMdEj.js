@@ -1,5 +1,6 @@
 import { _ as resolveBinary, a as denied, d as TOOLING_SECTION, f as hostShellRefusal, g as probeBinary, h as PACKAGE_ROOT, i as MODES, l as SECTION_ORDERS, m as renderToolingPolicy, n as prepareWorkspace, o as BACKGROUND_TOOLS, p as publicToolName, r as resolveWorker, s as BASH_TOOL, t as mountWorkspacePreparation, v as runtimeRoot } from "./workspace-preparation-Bi50pwsN.js";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -650,13 +651,251 @@ function confinedBash(file, { home = process.env.DSH_HOME ?? path.join(os.homedi
 	return result;
 }
 //#endregion
+//#region src/ops/shell-payloads.js
+/** Cordis-free pins and discovery, shared by build, installer and read-only runtime resolution. */
+const SHELL_PROVISION_COMMAND = "npx --package dsh-ops-lite dsh-ops-provision-shells";
+/** Archive versions stay upstream-shaped; payloadVersion must be valid npm SemVer. */
+const SHELL_UPSTREAM_PINS = Object.freeze([Object.freeze({
+	name: "bash",
+	label: "Git for Windows PortableGit",
+	platform: "win32",
+	arch: "x64",
+	payloadPackage: "@dshopslite/win32-x64-bash",
+	payloadVersion: "2.56.0-windows.2",
+	upstreamRepo: "https://github.com/git-for-windows/git",
+	releaseTag: "v2.56.0.windows.2",
+	version: "2.56.0.2",
+	assetFile: "PortableGit-2.56.0.2-64-bit.7z.exe",
+	url: "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/PortableGit-2.56.0.2-64-bit.7z.exe",
+	sha256: "075e158ef8e1f0ab80b347e245405d3eca735c2dc88fd8e032e137d0ca61f61b",
+	bytes: 60027568,
+	license: "GPL-2.0-only",
+	extractor: "sfx-7z",
+	extractTo: ".",
+	executableRelativePath: "bin/bash.exe",
+	executableSha256: "6cc575e9112efe6253b6a6999c12aa0240cb3f511aeda3480ae026edc0dc5280",
+	msysSha256: "2a89b7c31b323c42e2fb37900af087aeb27417694e630a210bc75b0369410bc7"
+}), Object.freeze({
+	name: "pwsh",
+	label: "PowerShell",
+	platform: "win32",
+	arch: "x64",
+	payloadPackage: "@dshopslite/win32-x64-pwsh",
+	payloadVersion: "7.6.6",
+	upstreamRepo: "https://github.com/PowerShell/PowerShell",
+	releaseTag: "v7.6.6",
+	version: "7.6.6",
+	assetFile: "PowerShell-7.6.6-win-x64.zip",
+	url: "https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/PowerShell-7.6.6-win-x64.zip",
+	sha256: "02fe458be20493fbdf43f61ea20610b811ee6c738ab1676c61b9cfcd1a33c860",
+	bytes: 106328873,
+	license: "MIT",
+	extractor: "zip",
+	extractTo: "bin",
+	executableRelativePath: "bin/pwsh.exe",
+	executableSha256: "bfb46af89433268872ddb43d1ca7a3f433452ee91ed356a9786940f90118e285"
+})]);
+function shellUpstreamPin({ kind, platform = process.platform, arch = process.arch }) {
+	return SHELL_UPSTREAM_PINS.find((pin) => pin.name === kind && pin.platform === platform && pin.arch === arch);
+}
+function shellStoreRoot({ env = process.env } = {}) {
+	const home = env.DSH_HOME ?? path.join(os.homedir(), ".dsh");
+	if (typeof home !== "string" || !path.isAbsolute(home)) throw new Error("DSH_HOME must be an absolute path for shell provisioning.");
+	return path.join(home, "dsh-ops", "shells");
+}
+function managedShellDirectory({ kind, env = process.env, platform = process.platform, arch = process.arch }) {
+	const pin = shellUpstreamPin({
+		kind,
+		platform,
+		arch
+	});
+	return pin ? path.join(shellStoreRoot({ env }), kind, pin.payloadVersion) : void 0;
+}
+function payloadExecutable(pin) {
+	return `vendor/${pin.name}/${pin.platform}-${pin.arch}/${pin.name === "bash" ? "bin/bash.exe" : "pwsh.exe"}`;
+}
+function shellFileSha256(file) {
+	if (!fs.statSync(file).isFile()) throw new Error(`Shell executable is not a regular file: ${file}`);
+	return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+/** Same bin wrapper / usr/bin layout as confinedBash; no host-runtime imports needed. */
+function bashMsysFile(file) {
+	const directory = path.dirname(file);
+	const root = path.basename(directory).toLowerCase() === "bin" && path.basename(path.dirname(directory)).toLowerCase() === "usr" ? path.resolve(directory, "../..") : path.resolve(directory, "..");
+	return path.join(root, "usr/bin/msys-2.0.dll");
+}
+function validateMsys(file, pin) {
+	if (!pin?.msysSha256 || shellFileSha256(bashMsysFile(file)) !== pin.msysSha256) throw new Error("Bash MSYS SHA256 mismatch; no verified DSH IPC compatibility build.");
+}
+/** Install-time only: execute a bounded, noninteractive identity probe before accepting local tools. */
+function validateLocalShell({ kind, file, env = process.env, platform = process.platform, arch = process.arch }) {
+	if (!path.isAbsolute(file) || isWslBashLauncher(file, env, platform)) throw new Error("Local shell must be an absolute, non-WSL executable.");
+	const result = spawnSync(file, kind === "bash" ? [
+		"--noprofile",
+		"--norc",
+		"--version"
+	] : [
+		"-NoLogo",
+		"-NoProfile",
+		"--version"
+	], {
+		env,
+		encoding: "utf8",
+		timeout: 5e3,
+		maxBuffer: 64e3,
+		windowsHide: true
+	});
+	if (result.error) throw result.error;
+	if (result.status !== 0) throw new Error(`Local ${kind} version probe failed (${result.signal ?? result.status}).`);
+	const output = String(result.stdout ?? "");
+	const version = (kind === "bash" ? /GNU bash, version (\d+\.\d+(?:\.\d+)?)/ : /PowerShell (\d+\.\d+(?:\.\d+)?)/).exec(output)?.[1];
+	if (!version || kind === "pwsh" && Number.parseInt(version) < 7) throw new Error(`Local ${kind} version unsupported: ${output.trim().slice(0, 160) || "(no version)"}`);
+	if (kind === "bash" && platform === "win32") validateMsys(file, shellUpstreamPin({
+		kind,
+		platform,
+		arch
+	}));
+	return {
+		file,
+		detectedVersion: version
+	};
+}
+/** Never trust an executable path or a digest supplied only by payload metadata. */
+function validateShellPayload(directory, pin) {
+	const metadata = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+	const payload = JSON.parse(fs.readFileSync(path.join(directory, "payload.json"), "utf8"));
+	const executable = payloadExecutable(pin);
+	if (metadata.name !== pin.payloadPackage || metadata.version !== pin.payloadVersion || !Array.isArray(metadata.os) || !metadata.os.includes(pin.platform) || !Array.isArray(metadata.cpu) || !metadata.cpu.includes(pin.arch) || payload.kind !== pin.name || payload.target !== `${pin.platform}-${pin.arch}` || payload.version !== pin.payloadVersion || payload.executable !== executable || payload.sha256 !== pin.executableSha256) throw new Error(`Shell payload metadata mismatch: ${pin.payloadPackage}@${pin.payloadVersion}`);
+	const file = path.join(directory, executable);
+	const relative = path.relative(fs.realpathSync(directory), fs.realpathSync(file));
+	if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative) || shellFileSha256(file) !== pin.executableSha256) throw new Error(`Shell payload executable SHA256/path mismatch: ${pin.name}`);
+	if (pin.name === "bash") validateMsys(file, pin);
+	return file;
+}
+/** Receipts are hints, never executable authority: validate constants and bytes on every read. */
+function managedShell({ kind, env = process.env, platform = process.platform, arch = process.arch, allowLocal = false }) {
+	const pin = shellUpstreamPin({
+		kind,
+		platform,
+		arch
+	});
+	if (!pin) return void 0;
+	try {
+		const directory = managedShellDirectory({
+			kind,
+			env,
+			platform,
+			arch
+		});
+		const receipt = JSON.parse(fs.readFileSync(path.join(directory, ".provisioned.json"), "utf8"));
+		if (receipt.kind !== kind || receipt.target !== `${platform}-${arch}` || receipt.version !== pin.payloadVersion) return void 0;
+		if (receipt.source === "payload" && receipt.sha256 === pin.executableSha256) {
+			const file = validateShellPayload(path.join(directory, "node_modules", pin.payloadPackage), pin);
+			return {
+				file,
+				source: "provisioned",
+				detail: `verified managed ${pin.payloadPackage}@${pin.payloadVersion}: ${file}`
+			};
+		}
+		if (allowLocal && receipt.source === "local" && typeof receipt.file === "string" && path.isAbsolute(receipt.file) && executableNames(kind, platform).includes(path.basename(receipt.file).toLowerCase()) && !isWslBashLauncher(receipt.file, env, platform) && /^\d+\.\d+(?:\.\d+)?$/.test(receipt.detectedVersion) && (kind !== "pwsh" || Number.parseInt(receipt.detectedVersion) >= 7) && /^[a-f0-9]{64}$/.test(receipt.sha256) && shellFileSha256(receipt.file) === receipt.sha256) {
+			if (kind === "bash" && platform === "win32") validateMsys(receipt.file, pin);
+			return {
+				file: receipt.file,
+				detectedVersion: receipt.detectedVersion,
+				source: "local",
+				detail: `verified local ${kind} ${receipt.detectedVersion}; system fallback explicitly permitted`
+			};
+		}
+	} catch {}
+}
+function isSpawnableFile$1(file) {
+	try {
+		const stat = fs.lstatSync(file);
+		return stat.isFile() || stat.isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+function isWslBashLauncher(file, env, platform) {
+	if (platform !== "win32" || typeof file !== "string") return false;
+	const systemRoot = env.SystemRoot ?? env.SYSTEMROOT;
+	if (!systemRoot?.trim()) return false;
+	const normalize = (value) => path.win32.normalize(value).replace(/[\\/]+$/, "").toLowerCase();
+	return normalize(file) === normalize(path.win32.join(systemRoot, "System32", "bash.exe"));
+}
+function wellKnownCandidates({ kind, env, platform }) {
+	if (platform !== "win32") return [];
+	const programFiles = env.ProgramFiles ?? env.PROGRAMFILES ?? "C:\\Program Files";
+	const programFilesX86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
+	const localAppData = env.LOCALAPPDATA ?? env.LocalAppData ?? "";
+	const userProfile = env.USERPROFILE ?? "";
+	return (kind === "bash" ? [
+		path.join(programFiles, "Git", "bin", "bash.exe"),
+		path.join(programFiles, "Git", "usr", "bin", "bash.exe"),
+		path.join(programFilesX86, "Git", "bin", "bash.exe"),
+		localAppData === "" ? "" : path.join(localAppData, "Programs", "Git", "bin", "bash.exe"),
+		userProfile === "" ? "" : path.join(userProfile, "scoop", "shims", "bash.exe"),
+		userProfile === "" ? "" : path.join(userProfile, "scoop", "apps", "git", "current", "bin", "bash.exe"),
+		"C:\\ProgramData\\chocolatey\\bin\\bash.exe",
+		"C:\\tools\\msys64\\usr\\bin\\bash.exe",
+		"C:\\msys64\\usr\\bin\\bash.exe"
+	] : [
+		path.join(programFiles, "PowerShell", "7", "pwsh.exe"),
+		path.join(programFiles, "PowerShell", "7-preview", "pwsh.exe"),
+		path.join(programFilesX86, "PowerShell", "7", "pwsh.exe"),
+		localAppData === "" ? "" : path.join(localAppData, "Microsoft", "WindowsApps", "pwsh.exe"),
+		userProfile === "" ? "" : path.join(userProfile, "scoop", "shims", "pwsh.exe"),
+		"C:\\ProgramData\\chocolatey\\bin\\pwsh.exe"
+	]).filter((file) => file !== "");
+}
+function executableNames(kind, platform) {
+	return platform === "win32" ? [`${kind}.exe`, kind] : [kind];
+}
+/** Ambient discovery; identity processes run only when the installer requests validation. */
+function systemShell({ kind, env = process.env, platform = process.platform, arch = process.arch, validate = false, warn = console.warn }) {
+	const seen = /* @__PURE__ */ new Set();
+	const candidate = (file, source) => {
+		if (seen.has(file) || !isSpawnableFile$1(file) || kind === "bash" && isWslBashLauncher(file, env, platform)) return void 0;
+		seen.add(file);
+		try {
+			const verified = validate ? validateLocalShell({
+				kind,
+				file,
+				env,
+				platform,
+				arch
+			}) : { file };
+			return {
+				...verified,
+				source,
+				detail: `${kind}${verified.detectedVersion ? ` ${verified.detectedVersion}` : ""} found at ${file}`
+			};
+		} catch (error) {
+			warn(`dsh-ops-lite: rejected local ${kind}: ${file}: ${error.message ?? error}; trying another candidate or the managed payload.`);
+			return;
+		}
+	};
+	const names = executableNames(kind, platform);
+	for (const entry of (env.PATH ?? env.Path ?? "").split(path.delimiter)) {
+		const directory = entry.trim().replace(/^"(.*)"$/, "$1");
+		if (!path.isAbsolute(directory)) continue;
+		for (const name of names) {
+			const found = candidate(path.join(directory, name), "path");
+			if (found) return found;
+		}
+	}
+	for (const file of wellKnownCandidates({
+		kind,
+		env,
+		platform
+	})) {
+		const found = candidate(file, "well-known");
+		if (found) return found;
+	}
+}
+//#endregion
 //#region src/ops/shells.js
-/**
-* Resolve shells without writing PATH, profiles or the working directory.
-* Windows shells come from the exact npm runtime package; Unix uses system Bash.
-* Configured Bash paths remain authoritative. Missing runtime packages fail closed;
-* there is no provisioner, download or compilation fallback.
-*/
+/** Read-only runtime resolution; only the separate install-time script provisions shells. */
 /** The directory this module was loaded from; the resolution root of a checkout. */
 const MODULE_ROOT = PACKAGE_ROOT;
 /** Model-facing name of the tool this module publishes for the bash rung. */
@@ -716,49 +955,14 @@ const SHELL_LAYOUTS = Object.freeze({
 		vendor: "pwsh"
 	}
 });
-Object.freeze([Object.freeze({
-	name: "bash",
-	label: "Git for Windows PortableGit",
-	platform: "win32",
-	arch: "x64",
-	upstreamRepo: "https://github.com/git-for-windows/git",
-	releaseTag: "v2.56.0.windows.2",
-	version: "2.56.0.2",
-	assetFile: "PortableGit-2.56.0.2-64-bit.7z.exe",
-	url: "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/PortableGit-2.56.0.2-64-bit.7z.exe",
-	sha256: "075e158ef8e1f0ab80b347e245405d3eca735c2dc88fd8e032e137d0ca61f61b",
-	bytes: 60027568,
-	license: "GPL-2.0-only",
-	extractor: "sfx-7z",
-	extractTo: ".",
-	executableRelativePath: "bin/bash.exe",
-	executableSha256: "6cc575e9112efe6253b6a6999c12aa0240cb3f511aeda3480ae026edc0dc5280"
-}), Object.freeze({
-	name: "pwsh",
-	label: "PowerShell",
-	platform: "win32",
-	arch: "x64",
-	upstreamRepo: "https://github.com/PowerShell/PowerShell",
-	releaseTag: "v7.6.6",
-	version: "7.6.6",
-	assetFile: "PowerShell-7.6.6-win-x64.zip",
-	url: "https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/PowerShell-7.6.6-win-x64.zip",
-	sha256: "02fe458be20493fbdf43f61ea20610b811ee6c738ab1676c61b9cfcd1a33c860",
-	bytes: 106328873,
-	license: "MIT",
-	extractor: "zip",
-	extractTo: "bin",
-	executableRelativePath: "bin/pwsh.exe",
-	executableSha256: "bfb46af89433268872ddb43d1ca7a3f433452ee91ed356a9786940f90118e285"
-})]);
 /**
 * One shell rung's resolution.
 * @typedef {object} ShellResolution
 * @property {boolean} available - whether this rung can run right now.
 * @property {string|undefined} file - the resolved executable, when available.
 * @property {string} source - where the answer came from, for reports and tests.
-*   One of `disabled`, `config`, `bundled`, `path`, `well-known`,
-*   `missing`.
+*   One of `disabled`, `config`, `provisioned`, `bundled`, `local`, `path`,
+*   `well-known`, `missing`.
 * @property {string} detail - a one-line English explanation, for reports.
 */
 /**
@@ -827,110 +1031,29 @@ function bundledShellPath({ kind, bundleRoot, platform, arch }) {
 *   unusable — as text for a report, and as the cause behind it.
 */
 function bundledShell({ kind, bundleRoot, platform, arch }) {
-	const file = bundledShellPath({
-		kind,
-		bundleRoot,
-		platform,
-		arch
-	});
-	return isSpawnableFile(file) ? {
-		file,
-		detail: void 0,
-		cause: void 0
-	} : {
-		file: void 0,
-		detail: `Runtime package does not contain ${kind}: ${file}`,
-		cause: "incomplete-tree"
-	};
-}
-/**
-* One executable found by walking a PATH-shaped string.
-*
-* This is a read-only walk of the value it was handed: it never writes PATH and
-* never consults anything but the string it is given.
-* @param {object} options - search inputs.
-* @param {string[]} options.names - executable names to accept, in order.
-* @param {string|undefined} options.pathValue - the PATH value to walk.
-* @param {(file: string) => boolean} [options.reject] - reject a discovered candidate.
-* @returns {string|undefined} the first existing entry, or undefined.
-*/
-function fromPath({ names, pathValue, reject }) {
-	if (typeof pathValue !== "string" || pathValue.trim() === "") return void 0;
-	for (const entry of pathValue.split(path.delimiter)) {
-		const directory = entry.trim().replace(/^"(.*)"$/, "$1");
-		if (directory === "" || !path.isAbsolute(directory)) continue;
-		for (const name of names) {
-			const file = path.join(directory, name);
-			if (isSpawnableFile(file) && !(reject?.(file) ?? false)) return file;
-		}
+	try {
+		const file = bundledShellPath({
+			kind,
+			bundleRoot,
+			platform,
+			arch
+		});
+		return isSpawnableFile(file) ? {
+			file,
+			detail: void 0,
+			cause: void 0
+		} : {
+			file: void 0,
+			detail: `Runtime package does not contain ${kind}: ${file}`,
+			cause: "incomplete-tree"
+		};
+	} catch (error) {
+		return {
+			file: void 0,
+			detail: String(error.message ?? error),
+			cause: "incomplete-tree"
+		};
 	}
-}
-/**
-* Windows ships `%SystemRoot%\\System32\\bash.exe` as the WSL distribution
-* launcher, not as a POSIX shell. Treating it as a normal PATH bash silently
-* moves commands into a Linux distribution, so it must never be selected by
-* the system fallback. `path.win32` is intentional: tests can exercise the
-* Windows resolver while running on another host platform.
-* @param {string} file - candidate executable.
-* @param {NodeJS.ProcessEnv} env - environment containing SystemRoot.
-* @param {string} platform - target platform.
-* @returns {boolean} whether the candidate is the WSL launcher.
-*/
-function isWslBashLauncher(file, env, platform) {
-	if (platform !== "win32") return false;
-	const systemRoot = env.SystemRoot ?? env.SYSTEMROOT;
-	if (typeof systemRoot !== "string" || systemRoot.trim() === "") return false;
-	const normalize = (value) => path.win32.normalize(value).replace(/[\\/]+$/, "").toLowerCase();
-	return normalize(file) === normalize(path.win32.join(systemRoot, "System32", "bash.exe"));
-}
-/**
-* The well-known install locations to probe for one rung.
-*
-* The bash list deliberately omits `%SystemRoot%\System32\bash.exe`: that is the
-* WSL distribution launcher, not a POSIX shell over the caller's filesystem, so
-* spawning it would silently run the command on a different machine. The pwsh
-* list keeps Windows PowerShell 5.1 last, matching upstream's own resolution
-* order (`packages/shell/pwsh-local/src/resolve.ts:21-37`).
-* @param {object} options - probe inputs.
-* @param {'bash'|'pwsh'} options.kind - which rung.
-* @param {NodeJS.ProcessEnv} options.env - the environment to read.
-* @param {string} options.platform - `process.platform`.
-* @returns {string[]} the candidate paths, in order.
-*/
-function wellKnownCandidates({ kind, env, platform }) {
-	if (platform !== "win32") return [];
-	const programFiles = env.ProgramFiles ?? env.PROGRAMFILES ?? "C:\\Program Files";
-	const programFilesX86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
-	const localAppData = env.LOCALAPPDATA ?? env.LocalAppData ?? "";
-	const userProfile = env.USERPROFILE ?? "";
-	return (kind === "bash" ? [
-		path.join(programFiles, "Git", "bin", "bash.exe"),
-		path.join(programFiles, "Git", "usr", "bin", "bash.exe"),
-		path.join(programFilesX86, "Git", "bin", "bash.exe"),
-		localAppData === "" ? "" : path.join(localAppData, "Programs", "Git", "bin", "bash.exe"),
-		userProfile === "" ? "" : path.join(userProfile, "scoop", "shims", "bash.exe"),
-		userProfile === "" ? "" : path.join(userProfile, "scoop", "apps", "git", "current", "bin", "bash.exe"),
-		"C:\\ProgramData\\chocolatey\\bin\\bash.exe",
-		"C:\\tools\\msys64\\usr\\bin\\bash.exe",
-		"C:\\msys64\\usr\\bin\\bash.exe"
-	] : [
-		path.join(programFiles, "PowerShell", "7", "pwsh.exe"),
-		path.join(programFiles, "PowerShell", "7-preview", "pwsh.exe"),
-		path.join(programFilesX86, "PowerShell", "7", "pwsh.exe"),
-		localAppData === "" ? "" : path.join(localAppData, "Microsoft", "WindowsApps", "pwsh.exe"),
-		userProfile === "" ? "" : path.join(userProfile, "scoop", "shims", "pwsh.exe"),
-		"C:\\ProgramData\\chocolatey\\bin\\pwsh.exe"
-	]).filter((file) => file !== "");
-}
-/**
-* The executable names one rung answers to.
-* @param {'bash'|'pwsh'} kind - which rung.
-* @param {string} platform - `process.platform`.
-* @returns {string[]} the names, in probe order.
-*/
-function executableNames(kind, platform) {
-	const base = kind === "bash" ? "bash" : "pwsh";
-	return platform === "win32" ? [`${base}.exe`, base] : [base];
 }
 /**
 * The remedy for a bash this deployment cannot place at all: the one action
@@ -939,16 +1062,17 @@ function executableNames(kind, platform) {
 * because it is one decision — the spawn wording only adds the sentence's
 * closing period.
 */
-const GENERIC_BASH_REMEDY = "reinstall dsh-ops-lite with optional dependencies enabled; no download or compilation fallback is used";
+const GENERIC_BASH_REMEDY = `run ${SHELL_PROVISION_COMMAND} to provision missing shells; runtime never downloads or compiles shells`;
 /**
-* Resolve the bash rung: explicit config, the npm runtime package, then — only
-* while the deployment allows a system shell — PATH and the
-* well-known install locations.
+* Resolve Bash: explicit config, verified managed payload, bundled tree, then
+* explicitly authorized local receipts (or Unix PATH discovery).
 *
 * A configured path is authoritative: when it is unusable the rung reports
 * `available: false` instead of quietly running a different shell.
 * @param {object} options - resolution inputs.
 * @param {string|undefined} options.configured - the configured executable.
+* @param {object|undefined} options.managed - verified managed payload.
+* @param {object|undefined} options.local - verified, explicitly permitted local receipt.
 * @param {string|undefined} options.bundled - the plugin's own executable, when it has one.
 * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
 * @param {boolean} options.allowSystemFallback - whether system installations may be used.
@@ -956,17 +1080,29 @@ const GENERIC_BASH_REMEDY = "reinstall dsh-ops-lite with optional dependencies e
 * @param {string} options.platform - `process.platform`.
 * @returns {ShellResolution} the resolution.
 */
-function resolveBash({ configured, bundled, bundledDetail, allowSystemFallback, env, platform }) {
-	if (configured !== void 0) return isSpawnableFile(configured) ? {
+function resolveBash({ configured, managed, local, bundled, bundledDetail, allowSystemFallback, env, platform }) {
+	if (configured !== void 0) {
+		if (isWslBashLauncher(configured, env, platform)) return {
+			available: false,
+			file: void 0,
+			source: "config",
+			detail: `the configured bash executable is the Windows WSL launcher, not a local Bash shell: ${configured}; no fallback is permitted`
+		};
+		return isSpawnableFile(configured) ? {
+			available: true,
+			file: configured,
+			source: "config",
+			detail: "configured bash executable"
+		} : {
+			available: false,
+			file: void 0,
+			source: "config",
+			detail: `the configured bash executable does not exist: ${configured}`
+		};
+	}
+	if (managed) return {
 		available: true,
-		file: configured,
-		source: "config",
-		detail: "configured bash executable"
-	} : {
-		available: false,
-		file: void 0,
-		source: "config",
-		detail: `the configured bash executable does not exist: ${configured}`
+		...managed
 	};
 	if (bundled !== void 0) return {
 		available: true,
@@ -980,61 +1116,62 @@ function resolveBash({ configured, bundled, bundledDetail, allowSystemFallback, 
 		source: "disabled",
 		detail: `no bundled bash and allowSystemShellFallback is false${bundledDetail === void 0 ? "" : ` (${bundledDetail})`}; ${GENERIC_BASH_REMEDY}`
 	};
-	const onPath = fromPath({
-		names: executableNames("bash", platform),
-		pathValue: env.PATH ?? env.Path,
-		reject: (file) => isWslBashLauncher(file, env, platform)
-	});
-	if (onPath !== void 0) return {
-		available: true,
-		file: onPath,
-		source: "path",
-		detail: "bash found on PATH"
-	};
-	for (const candidate of wellKnownCandidates({
+	const system = local ?? (platform !== "win32" ? systemShell({
 		kind: "bash",
 		env,
 		platform
-	})) if (isSpawnableFile(candidate)) return {
+	}) : void 0);
+	if (system) return {
 		available: true,
-		file: candidate,
-		source: "well-known",
-		detail: "well-known bash install"
+		...system
 	};
 	return {
 		available: false,
 		file: void 0,
 		source: "missing",
-		detail: `no bash found by config, the runtime package, PATH, or a well-known install location${bundledDetail === void 0 ? "" : ` (${bundledDetail})`}; ${GENERIC_BASH_REMEDY}`
+		detail: `no bash found by config, the runtime package, or a verified local receipt (run repair again after changing local shells)${bundledDetail === void 0 ? "" : ` (${bundledDetail})`}; ${GENERIC_BASH_REMEDY}`
 	};
 }
 /**
 * Resolve the PowerShell 7 rung.
 *
-* L3 is "the plugin's own pwsh 7", and whether that rung runs is decided by the
-* executable it needs actually being there: `cordis.patch.yml` points the
-* host's `pwsh-sandbox` row at this same path whenever it exists, so
-* `available` here and the host row's behaviour are one fact, not two. There is
-* deliberately no configured-path form: the row the plugin would have to
-* rewrite is resolved before any dsh-ops config is read.
+* The session overlay points the host pwsh-sandbox row at this resolution;
+* configured host pwshPath remains outside the plugin's configuration contract.
 * @param {object} options - resolution inputs.
+* @param {object|undefined} options.managed - verified managed payload.
+* @param {object|undefined} options.local - verified, explicitly permitted local receipt.
+* @param {NodeJS.ProcessEnv} options.env - environment to probe.
+* @param {string} options.platform - target platform.
 * @param {string|undefined} options.bundled - the plugin's own pwsh, when it has one.
 * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
 * @param {boolean} options.allowSystemFallback - whether the host's pwsh may serve as the last rung.
 * @returns {ShellResolution} the resolution.
 */
-function resolvePwsh({ bundled, bundledDetail, allowSystemFallback }) {
+function resolvePwsh({ managed, local, bundled, bundledDetail, allowSystemFallback, env, platform }) {
+	if (managed) return {
+		available: true,
+		...managed
+	};
 	if (bundled !== void 0) return {
 		available: true,
 		file: bundled,
 		source: "bundled",
 		detail: "the plugin's own PowerShell 7, which the pwsh-sandbox override points at"
 	};
+	const system = allowSystemFallback && (local ?? (platform !== "win32" ? systemShell({
+		kind: "pwsh",
+		env,
+		platform
+	}) : void 0));
+	if (system) return {
+		available: true,
+		...system
+	};
 	return {
 		available: false,
 		file: void 0,
 		source: "missing",
-		detail: `the plugin carries no PowerShell 7 for this platform${bundledDetail === void 0 ? "" : ` (${bundledDetail})`}; reinstall dsh-ops-lite with optional dependencies enabled on Windows${allowSystemFallback ? "; the host's own pwsh tool is the ladder's last rung" : "; allowSystemShellFallback is false, so the ladder has no PowerShell rung"}`
+		detail: `the plugin carries no PowerShell 7 for this platform${bundledDetail === void 0 ? "" : ` (${bundledDetail})`}; run ${SHELL_PROVISION_COMMAND}${allowSystemFallback ? "; no verified local receipt; rerun repair after changing local shells" : "; allowSystemShellFallback is false, so the ladder has no PowerShell rung"}`
 	};
 }
 /**
@@ -1064,14 +1201,23 @@ function resolveShells(config, options = {}) {
 		platform,
 		arch
 	};
+	const pwshManaged = managedShell({
+		kind: "pwsh",
+		...probe,
+		allowLocal: allowSystemFallback
+	});
 	const pwshBundled = bundledShell({
 		kind: "pwsh",
 		...probe
 	});
 	const pwsh = resolvePwsh({
+		managed: pwshManaged?.source === "provisioned" ? pwshManaged : void 0,
+		local: pwshManaged?.source === "local" ? pwshManaged : void 0,
 		bundled: pwshBundled.file,
 		bundledDetail: pwshBundled.detail,
-		allowSystemFallback
+		allowSystemFallback,
+		env,
+		platform
 	});
 	if (config?.publishBashTool === false) return {
 		bash: {
@@ -1082,6 +1228,11 @@ function resolveShells(config, options = {}) {
 		},
 		pwsh
 	};
+	const bashManaged = managedShell({
+		kind: "bash",
+		...probe,
+		allowLocal: allowSystemFallback
+	});
 	const bashBundled = bundledShell({
 		kind: "bash",
 		...probe
@@ -1089,6 +1240,8 @@ function resolveShells(config, options = {}) {
 	return {
 		bash: resolveBash({
 			configured: config?.bashPath,
+			managed: bashManaged?.source === "provisioned" ? bashManaged : void 0,
+			local: bashManaged?.source === "local" ? bashManaged : void 0,
 			bundled: bashBundled.file,
 			bundledDetail: bashBundled.detail,
 			allowSystemFallback,
@@ -1425,6 +1578,8 @@ const SYSTEM_BASH_SPAWN_REMEDY = "The system bash this deployment selected is go
 */
 const BASH_SPAWN_REMEDY = Object.freeze({
 	"bundled": "The bundled bash left the runtime package after resolution; reinstall with optional dependencies enabled.",
+	"provisioned": `The managed bash is unavailable; run ${SHELL_PROVISION_COMMAND}.`,
+	"local": SYSTEM_BASH_SPAWN_REMEDY,
 	"config": "The configured bashPath no longer exists; point bashPath at a real executable.",
 	"path": SYSTEM_BASH_SPAWN_REMEDY,
 	"well-known": SYSTEM_BASH_SPAWN_REMEDY
@@ -1687,7 +1842,7 @@ async function mountNativeFile(ctx, config, file) {
 }
 async function mountServer(ctx, config, runtime, component) {
 	if (!runtime) return;
-	const { FastCtxTools } = await import("./tools-DIuFvBvX.js");
+	const { FastCtxTools } = await import("./tools-CEvTvNnw.js");
 	const background = component === "background";
 	const surface = new FastCtxTools({
 		ctx,

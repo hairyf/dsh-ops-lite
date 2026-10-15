@@ -1,15 +1,13 @@
-/**
- * Resolve shells without writing PATH, profiles or the working directory.
- * Windows shells come from the exact npm runtime package; Unix uses system Bash.
- * Configured Bash paths remain authoritative. Missing runtime packages fail closed;
- * there is no provisioner, download or compilation fallback.
- */
+/** Read-only runtime resolution; only the separate install-time script provisions shells. */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { PACKAGE_ROOT, runtimeRoot } from './binary.js'
 import { publicToolName } from './policy.js'
+import { isWslBashLauncher, managedShell, SHELL_PROVISION_COMMAND, systemShell } from './shell-payloads.js'
+
+export { SHELL_UPSTREAM_PINS, shellUpstreamPin } from './shell-payloads.js'
 
 /** The directory this module was loaded from; the resolution root of a checkout. */
 const MODULE_ROOT = PACKAGE_ROOT
@@ -68,84 +66,13 @@ const SHELL_LAYOUTS = Object.freeze({
 })
 
 /**
- * The upstream release each bundled shell is pinned to.
- *
- * CI/development builds use these exact archives and digests when assembling
- * the Windows npm runtime package. Plugin loading never downloads them.
- *
- * - `sha256` is the digest of the archive exactly as published upstream;
- * - `executableSha256` is checked by the build after unpacking;
- * - `extractor` says how the archive is opened (`zip` through Windows' own
- *   bsdtar, `sfx-7z` by running the archive's own self-extractor) and
- *   `extractTo` where the archive's ROOT lands inside the version directory, so
- *   the executable ends up at `<extractTo>/<file name>`.
- *
- * The two layouts differ on purpose: the PowerShell zip holds `pwsh.exe` at its
- * root and is unpacked into `bin/`, while PortableGit's self-extracting archive
- * holds the whole Git tree — `bin/bash.exe` included — and is unpacked at the
- * version root.
- */
-export const SHELL_UPSTREAM_PINS = Object.freeze([
-  Object.freeze({
-    name: 'bash',
-    label: 'Git for Windows PortableGit',
-    platform: 'win32',
-    arch: 'x64',
-    upstreamRepo: 'https://github.com/git-for-windows/git',
-    releaseTag: 'v2.56.0.windows.2',
-    version: '2.56.0.2',
-    assetFile: 'PortableGit-2.56.0.2-64-bit.7z.exe',
-    url: 'https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/PortableGit-2.56.0.2-64-bit.7z.exe',
-    sha256: '075e158ef8e1f0ab80b347e245405d3eca735c2dc88fd8e032e137d0ca61f61b',
-    bytes: 60_027_568,
-    license: 'GPL-2.0-only',
-    extractor: 'sfx-7z',
-    extractTo: '.',
-    executableRelativePath: 'bin/bash.exe',
-    executableSha256: '6cc575e9112efe6253b6a6999c12aa0240cb3f511aeda3480ae026edc0dc5280',
-  }),
-  Object.freeze({
-    name: 'pwsh',
-    label: 'PowerShell',
-    platform: 'win32',
-    arch: 'x64',
-    upstreamRepo: 'https://github.com/PowerShell/PowerShell',
-    releaseTag: 'v7.6.6',
-    version: '7.6.6',
-    assetFile: 'PowerShell-7.6.6-win-x64.zip',
-    url: 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/PowerShell-7.6.6-win-x64.zip',
-    sha256: '02fe458be20493fbdf43f61ea20610b811ee6c738ab1676c61b9cfcd1a33c860',
-    bytes: 106_328_873,
-    license: 'MIT',
-    extractor: 'zip',
-    extractTo: 'bin',
-    executableRelativePath: 'bin/pwsh.exe',
-    executableSha256: 'bfb46af89433268872ddb43d1ca7a3f433452ee91ed356a9786940f90118e285',
-  }),
-])
-
-/**
- * The pin for one shell on one platform.
- * @param {object} options - the lookup.
- * @param {'bash'|'pwsh'} options.kind - which shell.
- * @param {string} [options.platform] - `process.platform`.
- * @param {string} [options.arch] - `process.arch`.
- * @returns {object|undefined} the pin, or undefined when this platform has none.
- */
-export function shellUpstreamPin({ kind, platform = process.platform, arch = process.arch }) {
-  return SHELL_UPSTREAM_PINS.find(pin => (
-    pin.name === kind && pin.platform === platform && pin.arch === arch
-  ))
-}
-
-/**
  * One shell rung's resolution.
  * @typedef {object} ShellResolution
  * @property {boolean} available - whether this rung can run right now.
  * @property {string|undefined} file - the resolved executable, when available.
  * @property {string} source - where the answer came from, for reports and tests.
- *   One of `disabled`, `config`, `bundled`, `path`, `well-known`,
- *   `missing`.
+ *   One of `disabled`, `config`, `provisioned`, `bundled`, `local`, `path`,
+ *   `well-known`, `missing`.
  * @property {string} detail - a one-line English explanation, for reports.
  */
 
@@ -217,114 +144,15 @@ export function bundledShellPath({ kind, bundleRoot, platform, arch }) {
  *   unusable — as text for a report, and as the cause behind it.
  */
 export function bundledShell({ kind, bundleRoot, platform, arch }) {
-  const file = bundledShellPath({ kind, bundleRoot, platform, arch })
-  return isSpawnableFile(file)
-    ? { file, detail: undefined, cause: undefined }
-    : { file: undefined, detail: `Runtime package does not contain ${kind}: ${file}`, cause: 'incomplete-tree' }
-}
-
-/**
- * One executable found by walking a PATH-shaped string.
- *
- * This is a read-only walk of the value it was handed: it never writes PATH and
- * never consults anything but the string it is given.
- * @param {object} options - search inputs.
- * @param {string[]} options.names - executable names to accept, in order.
- * @param {string|undefined} options.pathValue - the PATH value to walk.
- * @param {(file: string) => boolean} [options.reject] - reject a discovered candidate.
- * @returns {string|undefined} the first existing entry, or undefined.
- */
-function fromPath({ names, pathValue, reject }) {
-  if (typeof pathValue !== 'string' || pathValue.trim() === '')
-    return undefined
-  for (const entry of pathValue.split(path.delimiter)) {
-    // PATH entries may carry surrounding quotes from `setx`-style definitions.
-    const directory = entry.trim().replace(/^"(.*)"$/, '$1')
-    if (directory === '' || !path.isAbsolute(directory))
-      continue
-    for (const name of names) {
-      const file = path.join(directory, name)
-      if (isSpawnableFile(file) && !(reject?.(file) ?? false))
-        return file
-    }
+  try {
+    const file = bundledShellPath({ kind, bundleRoot, platform, arch })
+    return isSpawnableFile(file)
+      ? { file, detail: undefined, cause: undefined }
+      : { file: undefined, detail: `Runtime package does not contain ${kind}: ${file}`, cause: 'incomplete-tree' }
   }
-  return undefined
-}
-
-/**
- * Windows ships `%SystemRoot%\\System32\\bash.exe` as the WSL distribution
- * launcher, not as a POSIX shell. Treating it as a normal PATH bash silently
- * moves commands into a Linux distribution, so it must never be selected by
- * the system fallback. `path.win32` is intentional: tests can exercise the
- * Windows resolver while running on another host platform.
- * @param {string} file - candidate executable.
- * @param {NodeJS.ProcessEnv} env - environment containing SystemRoot.
- * @param {string} platform - target platform.
- * @returns {boolean} whether the candidate is the WSL launcher.
- */
-function isWslBashLauncher(file, env, platform) {
-  if (platform !== 'win32')
-    return false
-  const systemRoot = env.SystemRoot ?? env.SYSTEMROOT
-  if (typeof systemRoot !== 'string' || systemRoot.trim() === '')
-    return false
-  const normalize = value => path.win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
-  return normalize(file) === normalize(path.win32.join(systemRoot, 'System32', 'bash.exe'))
-}
-
-/**
- * The well-known install locations to probe for one rung.
- *
- * The bash list deliberately omits `%SystemRoot%\System32\bash.exe`: that is the
- * WSL distribution launcher, not a POSIX shell over the caller's filesystem, so
- * spawning it would silently run the command on a different machine. The pwsh
- * list keeps Windows PowerShell 5.1 last, matching upstream's own resolution
- * order (`packages/shell/pwsh-local/src/resolve.ts:21-37`).
- * @param {object} options - probe inputs.
- * @param {'bash'|'pwsh'} options.kind - which rung.
- * @param {NodeJS.ProcessEnv} options.env - the environment to read.
- * @param {string} options.platform - `process.platform`.
- * @returns {string[]} the candidate paths, in order.
- */
-function wellKnownCandidates({ kind, env, platform }) {
-  if (platform !== 'win32')
-    return []
-  const programFiles = env.ProgramFiles ?? env.PROGRAMFILES ?? 'C:\\Program Files'
-  const programFilesX86 = env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
-  const localAppData = env.LOCALAPPDATA ?? env.LocalAppData ?? ''
-  const userProfile = env.USERPROFILE ?? ''
-  const candidates = kind === 'bash'
-    ? [
-        path.join(programFiles, 'Git', 'bin', 'bash.exe'),
-        path.join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
-        path.join(programFilesX86, 'Git', 'bin', 'bash.exe'),
-        localAppData === '' ? '' : path.join(localAppData, 'Programs', 'Git', 'bin', 'bash.exe'),
-        userProfile === '' ? '' : path.join(userProfile, 'scoop', 'shims', 'bash.exe'),
-        userProfile === '' ? '' : path.join(userProfile, 'scoop', 'apps', 'git', 'current', 'bin', 'bash.exe'),
-        'C:\\ProgramData\\chocolatey\\bin\\bash.exe',
-        'C:\\tools\\msys64\\usr\\bin\\bash.exe',
-        'C:\\msys64\\usr\\bin\\bash.exe',
-      ]
-    : [
-        path.join(programFiles, 'PowerShell', '7', 'pwsh.exe'),
-        path.join(programFiles, 'PowerShell', '7-preview', 'pwsh.exe'),
-        path.join(programFilesX86, 'PowerShell', '7', 'pwsh.exe'),
-        localAppData === '' ? '' : path.join(localAppData, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
-        userProfile === '' ? '' : path.join(userProfile, 'scoop', 'shims', 'pwsh.exe'),
-        'C:\\ProgramData\\chocolatey\\bin\\pwsh.exe',
-      ]
-  return candidates.filter(file => file !== '')
-}
-
-/**
- * The executable names one rung answers to.
- * @param {'bash'|'pwsh'} kind - which rung.
- * @param {string} platform - `process.platform`.
- * @returns {string[]} the names, in probe order.
- */
-function executableNames(kind, platform) {
-  const base = kind === 'bash' ? 'bash' : 'pwsh'
-  return platform === 'win32' ? [`${base}.exe`, base] : [base]
+  catch (error) {
+    return { file: undefined, detail: String(error.message ?? error), cause: 'incomplete-tree' }
+  }
 }
 
 /**
@@ -334,17 +162,18 @@ function executableNames(kind, platform) {
  * because it is one decision — the spawn wording only adds the sentence's
  * closing period.
  */
-const GENERIC_BASH_REMEDY = 'reinstall dsh-ops-lite with optional dependencies enabled; no download or compilation fallback is used'
+const GENERIC_BASH_REMEDY = `run ${SHELL_PROVISION_COMMAND} to provision missing shells; runtime never downloads or compiles shells`
 
 /**
- * Resolve the bash rung: explicit config, the npm runtime package, then — only
- * while the deployment allows a system shell — PATH and the
- * well-known install locations.
+ * Resolve Bash: explicit config, verified managed payload, bundled tree, then
+ * explicitly authorized local receipts (or Unix PATH discovery).
  *
  * A configured path is authoritative: when it is unusable the rung reports
  * `available: false` instead of quietly running a different shell.
  * @param {object} options - resolution inputs.
  * @param {string|undefined} options.configured - the configured executable.
+ * @param {object|undefined} options.managed - verified managed payload.
+ * @param {object|undefined} options.local - verified, explicitly permitted local receipt.
  * @param {string|undefined} options.bundled - the plugin's own executable, when it has one.
  * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
  * @param {boolean} options.allowSystemFallback - whether system installations may be used.
@@ -354,6 +183,8 @@ const GENERIC_BASH_REMEDY = 'reinstall dsh-ops-lite with optional dependencies e
  */
 function resolveBash({
   configured,
+  managed,
+  local,
   bundled,
   bundledDetail,
   allowSystemFallback,
@@ -361,6 +192,14 @@ function resolveBash({
   platform,
 }) {
   if (configured !== undefined) {
+    if (isWslBashLauncher(configured, env, platform)) {
+      return {
+        available: false,
+        file: undefined,
+        source: 'config',
+        detail: `the configured bash executable is the Windows WSL launcher, not a local Bash shell: ${configured}; no fallback is permitted`,
+      }
+    }
     return isSpawnableFile(configured)
       ? { available: true, file: configured, source: 'config', detail: 'configured bash executable' }
       : {
@@ -370,6 +209,8 @@ function resolveBash({
           detail: `the configured bash executable does not exist: ${configured}`,
         }
   }
+  if (managed)
+    return { available: true, ...managed }
   if (bundled !== undefined) {
     return {
       available: true,
@@ -388,25 +229,15 @@ function resolveBash({
       }; ${GENERIC_BASH_REMEDY}`,
     }
   }
-  const onPath = fromPath({
-    names: executableNames('bash', platform),
-    pathValue: env.PATH ?? env.Path,
-    reject: file => isWslBashLauncher(file, env, platform),
-  })
-  if (onPath !== undefined) {
-    return { available: true, file: onPath, source: 'path', detail: 'bash found on PATH' }
-  }
-  for (const candidate of wellKnownCandidates({ kind: 'bash', env, platform })) {
-    if (isSpawnableFile(candidate)) {
-      return { available: true, file: candidate, source: 'well-known', detail: 'well-known bash install' }
-    }
-  }
+  const system = local ?? (platform !== 'win32' ? systemShell({ kind: 'bash', env, platform }) : undefined)
+  if (system)
+    return { available: true, ...system }
   return {
     available: false,
     file: undefined,
     source: 'missing',
-    detail: `no bash found by config, the runtime package, PATH, or a well-known `
-      + `install location${
+    detail: `no bash found by config, the runtime package, or a verified local receipt `
+      + `(run repair again after changing local shells)${
         bundledDetail === undefined ? '' : ` (${bundledDetail})`
       }; ${GENERIC_BASH_REMEDY}`,
   }
@@ -415,19 +246,21 @@ function resolveBash({
 /**
  * Resolve the PowerShell 7 rung.
  *
- * L3 is "the plugin's own pwsh 7", and whether that rung runs is decided by the
- * executable it needs actually being there: `cordis.patch.yml` points the
- * host's `pwsh-sandbox` row at this same path whenever it exists, so
- * `available` here and the host row's behaviour are one fact, not two. There is
- * deliberately no configured-path form: the row the plugin would have to
- * rewrite is resolved before any dsh-ops config is read.
+ * The session overlay points the host pwsh-sandbox row at this resolution;
+ * configured host pwshPath remains outside the plugin's configuration contract.
  * @param {object} options - resolution inputs.
+ * @param {object|undefined} options.managed - verified managed payload.
+ * @param {object|undefined} options.local - verified, explicitly permitted local receipt.
+ * @param {NodeJS.ProcessEnv} options.env - environment to probe.
+ * @param {string} options.platform - target platform.
  * @param {string|undefined} options.bundled - the plugin's own pwsh, when it has one.
  * @param {string|undefined} options.bundledDetail - why the plugin's own copy is unusable, when it has none.
  * @param {boolean} options.allowSystemFallback - whether the host's pwsh may serve as the last rung.
  * @returns {ShellResolution} the resolution.
  */
-function resolvePwsh({ bundled, bundledDetail, allowSystemFallback }) {
+function resolvePwsh({ managed, local, bundled, bundledDetail, allowSystemFallback, env, platform }) {
+  if (managed)
+    return { available: true, ...managed }
   if (bundled !== undefined) {
     return {
       available: true,
@@ -436,15 +269,18 @@ function resolvePwsh({ bundled, bundledDetail, allowSystemFallback }) {
       detail: 'the plugin\'s own PowerShell 7, which the pwsh-sandbox override points at',
     }
   }
+  const system = allowSystemFallback && (local ?? (platform !== 'win32' ? systemShell({ kind: 'pwsh', env, platform }) : undefined))
+  if (system)
+    return { available: true, ...system }
   return {
     available: false,
     file: undefined,
     source: 'missing',
     detail: `the plugin carries no PowerShell 7 for this platform${
       bundledDetail === undefined ? '' : ` (${bundledDetail})`
-    }; reinstall dsh-ops-lite with optional dependencies enabled on Windows${
+    }; run ${SHELL_PROVISION_COMMAND}${
       allowSystemFallback
-        ? '; the host\'s own pwsh tool is the ladder\'s last rung'
+        ? '; no verified local receipt; rerun repair after changing local shells'
         : '; allowSystemShellFallback is false, so the ladder has no PowerShell rung'}`,
   }
 }
@@ -471,12 +307,17 @@ export function resolveShells(config, options = {}) {
   const arch = options.arch ?? process.arch
   const allowSystemFallback = config?.allowSystemShellFallback === true
   const probe = { bundleRoot, env, platform, arch }
+  const pwshManaged = managedShell({ kind: 'pwsh', ...probe, allowLocal: allowSystemFallback })
   const pwshBundled = bundledShell({ kind: 'pwsh', ...probe })
 
   const pwsh = resolvePwsh({
+    managed: pwshManaged?.source === 'provisioned' ? pwshManaged : undefined,
+    local: pwshManaged?.source === 'local' ? pwshManaged : undefined,
     bundled: pwshBundled.file,
     bundledDetail: pwshBundled.detail,
     allowSystemFallback,
+    env,
+    platform,
   })
 
   if (config?.publishBashTool === false) {
@@ -491,10 +332,13 @@ export function resolveShells(config, options = {}) {
     }
   }
 
+  const bashManaged = managedShell({ kind: 'bash', ...probe, allowLocal: allowSystemFallback })
   const bashBundled = bundledShell({ kind: 'bash', ...probe })
   return {
     bash: resolveBash({
       configured: config?.bashPath,
+      managed: bashManaged?.source === 'provisioned' ? bashManaged : undefined,
+      local: bashManaged?.source === 'local' ? bashManaged : undefined,
       bundled: bashBundled.file,
       bundledDetail: bashBundled.detail,
       allowSystemFallback,
@@ -870,6 +714,8 @@ const SYSTEM_BASH_SPAWN_REMEDY = 'The system bash this deployment selected is go
  */
 const BASH_SPAWN_REMEDY = Object.freeze({
   'bundled': 'The bundled bash left the runtime package after resolution; reinstall with optional dependencies enabled.',
+  'provisioned': `The managed bash is unavailable; run ${SHELL_PROVISION_COMMAND}.`,
+  'local': SYSTEM_BASH_SPAWN_REMEDY,
   'config': 'The configured bashPath no longer exists; point bashPath at a real executable.',
   'path': SYSTEM_BASH_SPAWN_REMEDY,
   'well-known': SYSTEM_BASH_SPAWN_REMEDY,
