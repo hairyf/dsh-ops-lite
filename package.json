@@ -76,7 +76,7 @@
     "dev": "tsdown --watch",
     "lint": "eslint",
     "prepack": "pnpm run build",
-    "release": "bumpp",
+    "release": "node node_modules/bumpp/bin/bumpp.mjs",
     "start": "tsx src/index.ts",
     "test": "pnpm run build && vitest",
     "test:e2e": "node test/e2e/run.mjs",

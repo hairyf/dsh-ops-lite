@@ -89,7 +89,7 @@ it('executes release preparation with native or JavaScript pnpm and stops on com
     fs.mkdirSync(path.join(temporary, 'native'))
     for (const file of ['package.json', 'native/Cargo.toml', 'native/Cargo.lock'])
       fs.copyFileSync(path.join(root, file), path.join(temporary, file))
-    const context = { options: { cwd: temporary } }
+    const context = { options: { cwd: temporary, commit: true } }
     vi.stubEnv('npm_execpath', undefined)
     expect(() => bumpConfig.execute(context)).toThrow('Run releases with pnpm release.')
     expect(spawnSync).not.toHaveBeenCalled()
@@ -99,20 +99,77 @@ it('executes release preparation with native or JavaScript pnpm and stops on com
       bumpConfig.execute(context)
       const isScript = /\.[cm]?js$/.test(pnpm)
       expect(spawnSync.mock.calls).toEqual([
-        ['install', '--lockfile-only', '--ignore-scripts'],
-        ['run', 'build'],
-      ].map(args => [isScript ? process.execPath : pnpm, isScript ? [pnpm, ...args] : args, { cwd: temporary, stdio: 'inherit' }]))
+        ...[
+          ['install', '--lockfile-only', '--ignore-scripts'],
+          ['run', 'build'],
+        ].map(args => [isScript ? process.execPath : pnpm, isScript ? [pnpm, ...args] : args, { cwd: temporary, stdio: 'inherit' }]),
+        ['git', ['add', '--', 'dist'], { cwd: temporary, stdio: 'inherit' }],
+      ])
     }
+    vi.mocked(spawnSync).mockClear()
+    bumpConfig.execute({ options: { cwd: temporary, commit: false } })
+    expect(spawnSync).toHaveBeenCalledTimes(2)
+    expect(spawnSync.mock.calls.every(([command]) => command !== 'git')).toBe(true)
     const error = new Error('pnpm could not start')
     for (const [result, expected] of [
       [{ error }, error],
       [{ status: 1 }, 'Release preparation failed (1).'],
       [{ status: null, signal: 'SIGTERM' }, 'Release preparation failed (SIGTERM).'],
     ]) {
-      vi.mocked(spawnSync).mockReset().mockReturnValue(result)
-      expect(() => bumpConfig.execute(context)).toThrow(expected)
-      expect(spawnSync).toHaveBeenCalledTimes(1)
+      for (const failedCommand of [0, 1, 2]) {
+        vi.mocked(spawnSync).mockReset().mockReturnValue({ status: 0 })
+        for (let command = 0; command < failedCommand; command++)
+          vi.mocked(spawnSync).mockReturnValueOnce({ status: 0 })
+        vi.mocked(spawnSync).mockReturnValueOnce(result)
+        expect(() => bumpConfig.execute(context)).toThrow(expected)
+        expect(spawnSync).toHaveBeenCalledTimes(failedCommand + 1)
+      }
     }
+  }
+  finally {
+    vi.unstubAllEnvs()
+    vi.mocked(spawnSync).mockReset()
+    fs.rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+it('stages new release chunks and removed old chunks without staging unrelated files', async () => {
+  const { spawnSync: actualSpawnSync } = await vi.importActual('node:child_process')
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const temporary = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ops-release-index-')))
+  const git = (args) => {
+    const result = actualSpawnSync('git', args, { cwd: temporary, encoding: 'utf8' })
+    if (result.error)
+      throw result.error
+    expect(result.status, result.stderr).toBe(0)
+    return result.stdout.trim()
+  }
+  try {
+    fs.mkdirSync(path.join(temporary, 'native'))
+    fs.mkdirSync(path.join(temporary, 'dist'))
+    for (const file of ['package.json', 'native/Cargo.toml', 'native/Cargo.lock'])
+      fs.copyFileSync(path.join(root, file), path.join(temporary, file))
+    fs.writeFileSync(path.join(temporary, 'dist/old-hash.js'), 'old chunk')
+    git(['init', '--quiet'])
+    git(['add', '--', 'dist'])
+    git(['-c', 'core.hooksPath=disabled-hooks', '-c', 'user.name=Release Test', '-c', 'user.email=release@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'fixture'])
+    fs.writeFileSync(path.join(temporary, 'scratch.txt'), 'unrelated')
+    vi.stubEnv('npm_execpath', '/fixture/pnpm')
+    vi.mocked(spawnSync).mockReset().mockImplementation((command, args, options) => {
+      if (command === 'git')
+        return actualSpawnSync(command, args, options)
+      if (args[0] === 'run') {
+        fs.rmSync(path.join(temporary, 'dist/old-hash.js'))
+        fs.writeFileSync(path.join(temporary, 'dist/new-hash.js'), 'new chunk')
+      }
+      return { status: 0 }
+    })
+    bumpConfig.execute({ options: { cwd: temporary, commit: true } })
+    expect(git(['diff', '--cached', '--name-status']).split(/\r?\n/).sort()).toEqual([
+      'A\tdist/new-hash.js',
+      'D\tdist/old-hash.js',
+    ])
+    expect(git(['ls-files', '--others', '--exclude-standard'])).toContain('scratch.txt')
   }
   finally {
     vi.unstubAllEnvs()
