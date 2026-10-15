@@ -1,6 +1,6 @@
 {
   "name": "@dshopslite/darwin-arm64",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "macOS arm64 native runtime for dsh-ops-lite",
   "license": "MIT AND Apache-2.0",
   "repository": {

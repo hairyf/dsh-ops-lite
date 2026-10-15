@@ -1,5 +1,5 @@
-import { C as PACKAGE_NAME } from "./workspace-preparation-D0pi029l.js";
-import { t as applyComponent } from "./ops-q0FFS0iN.js";
+import { C as PACKAGE_NAME } from "./workspace-preparation-D85l4ytv.js";
+import { t as applyComponent } from "./ops-BZZPSs4k.js";
 import process from "node:process";
 //#region src/background.ts
 const name = `${PACKAGE_NAME}/background`;

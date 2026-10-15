@@ -31,7 +31,7 @@ const OFFICIAL_TOOLS_DESCRIPTION = "开启后禁用官方基础文件与 Shell �
 const DEFAULT_CONFIG = { disableOfficialTools: true };
 //#endregion
 //#region package.json
-var version = "0.1.1";
+var version = "0.1.2";
 var optionalDependencies = {
 	"@dshopslite/darwin-arm64": "workspace:*",
 	"@dshopslite/linux-x64": "workspace:*",

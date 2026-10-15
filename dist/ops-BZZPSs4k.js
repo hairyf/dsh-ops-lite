@@ -1,4 +1,4 @@
-import { _ as resolveBinary, a as denied, d as TOOLING_SECTION, f as hostShellRefusal, g as probeBinary, h as PACKAGE_ROOT, i as MODES, l as SECTION_ORDERS, m as renderToolingPolicy, n as prepareWorkspace, o as BACKGROUND_TOOLS, p as publicToolName, r as resolveWorker, s as BASH_TOOL, t as mountWorkspacePreparation, v as runtimeRoot } from "./workspace-preparation-D0pi029l.js";
+import { _ as resolveBinary, a as denied, d as TOOLING_SECTION, f as hostShellRefusal, g as probeBinary, h as PACKAGE_ROOT, i as MODES, l as SECTION_ORDERS, m as renderToolingPolicy, n as prepareWorkspace, o as BACKGROUND_TOOLS, p as publicToolName, r as resolveWorker, s as BASH_TOOL, t as mountWorkspacePreparation, v as runtimeRoot } from "./workspace-preparation-D85l4ytv.js";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -1687,7 +1687,7 @@ async function mountNativeFile(ctx, config, file) {
 }
 async function mountServer(ctx, config, runtime, component) {
 	if (!runtime) return;
-	const { FastCtxTools } = await import("./tools-BToCpUxN.js");
+	const { FastCtxTools } = await import("./tools-D4u_vdC6.js");
 	const background = component === "background";
 	const surface = new FastCtxTools({
 		ctx,

@@ -1,4 +1,4 @@
-import { C as PACKAGE_NAME, a as denied, n as prepareWorkspace, p as publicToolName, r as resolveWorker, t as mountWorkspacePreparation } from "./workspace-preparation-D0pi029l.js";
+import { C as PACKAGE_NAME, a as denied, n as prepareWorkspace, p as publicToolName, r as resolveWorker, t as mountWorkspacePreparation } from "./workspace-preparation-D85l4ytv.js";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
