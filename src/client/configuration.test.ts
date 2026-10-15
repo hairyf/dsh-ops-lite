@@ -59,6 +59,10 @@ describe('configuration contract', () => {
     expect(patch.replaceAll('\r\n', '\n')).toContain(`- id: ${CONFIG_ROW_ID}\n      name: ${manifest.name}\n`)
     expect(manifest.exports['./locale/*.json']).toBe(manifest.exports['./file/locale/*.json'])
     expect(manifest.exports['./icon']).toBe(manifest.exports['./file/icon'])
+    for (const language of ['en', 'zh']) {
+      const locale = JSON.parse(readFileSync(new URL(`../components/file/locale/${language}.json`, import.meta.url), 'utf8'))
+      expect(locale.meta.title).toBe(manifest.name)
+    }
   })
 
   it('defaults to enabled in the file-row namespace and preserves explicit false', () => {

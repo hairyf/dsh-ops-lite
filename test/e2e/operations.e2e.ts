@@ -13,7 +13,7 @@ const ptcTools = ['ops_batch', 'ops_result']
 
 async function openSettings(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^(?:Plugins|插件)$/ }).click()
-  await page.getByRole('button', { name: /^(?:View|查看) (?:dsh-ops-lite|dsh-ops-file)$/i }).click()
+  await page.getByRole('button', { name: /^(?:View|查看) dsh-ops-lite$/i }).click()
 }
 
 async function reloadSettings(page: Page): Promise<void> {
@@ -98,7 +98,7 @@ test('isolated Harness L2: independent components, immediate policy saving, nati
 
   await test.step('four real component entries expose their upstream defaults and enable optional runtimes', async () => {
     await expect(component(page, 'dsh-ops-bash & powershell 7')).toBeChecked()
-    await expect(component(page, 'dsh-ops-file')).toBeChecked()
+    await expect(component(page, 'dsh-ops-lite')).toBeChecked()
     await expect(component(page, 'dsh-ops-background')).not.toBeChecked()
     await expect(component(page, 'dsh-ops-ptc')).not.toBeChecked()
     await component(page, 'dsh-ops-background').click()
@@ -153,7 +153,7 @@ test('isolated Harness L2: independent components, immediate policy saving, nati
   await test.step('each independent component really unregisters and restores its own tools', async () => {
     const components: { title: string, scope: Scope, tools: string[], name: string, args: Record<string, unknown> }[] = [
       { title: 'dsh-ops-bash & powershell 7', scope: 'native', tools: ['ops_bash'], name: 'ops_bash', args: { command: 'printf OPS_REENABLED', workdir: host.workspace } },
-      { title: 'dsh-ops-file', scope: 'native', tools: fileTools, name: 'ops_inspect_local_file', args: { path: 'native.txt' } },
+      { title: 'dsh-ops-lite', scope: 'native', tools: fileTools, name: 'ops_inspect_local_file', args: { path: 'native.txt' } },
       { title: 'dsh-ops-background', scope: 'native', tools: backgroundTools, name: 'ops_job_list', args: { status: 'all', limit: 10, offset: 0 } },
       { title: 'dsh-ops-ptc', scope: 'ptc', tools: ptcTools, name: 'run_code', args: { description: 'Verify restored PTC batch planning', code: 'return await tools.ops_batch({action:"plan",operations:[{op:"copy",path:"native.txt",to:"ptc-restored.txt"}]});' } },
     ]
@@ -223,7 +223,7 @@ test('isolated Harness L2: independent components, immediate policy saving, nati
     await reloadSettings(page)
     await expect(setting).toBeChecked()
     expect((await host.call('read', args)).isError).toBe(true)
-    for (const title of ['dsh-ops-bash & powershell 7', 'dsh-ops-file', 'dsh-ops-background', 'dsh-ops-ptc'])
+    for (const title of ['dsh-ops-bash & powershell 7', 'dsh-ops-lite', 'dsh-ops-background', 'dsh-ops-ptc'])
       await expect(component(page, title)).toBeChecked()
   })
 })

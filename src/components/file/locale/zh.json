@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "dsh-ops-file",
+    "title": "dsh-ops-lite",
     "description": "更快、更高性能、输出更精简更省 token 的 Rust 文件检索。"
   }
 }
