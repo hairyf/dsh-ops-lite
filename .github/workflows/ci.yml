@@ -60,8 +60,17 @@ jobs:
         run: pnpm run lint
       - name: Typecheck
         run: pnpm run typecheck
-      - name: Unit tests
-        run: pnpm run test -- --run
+      - name: Unit tests and coverage
+        run: pnpm run test --run --coverage
+      - name: Upload coverage to Codecov
+        if: runner.os == 'Linux'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: hairyf/dsh-ops-next
+          files: ./coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
       - name: Build JavaScript, Rust worker, FastCtx and platform runtime assets
         # The tsdown hook owns all required native/assets builds; no user provisioning.
         run: pnpm run build

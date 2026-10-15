@@ -125,6 +125,7 @@
     "@playwright/test": "catalog:",
     "@types/node": "catalog:types",
     "@types/react": "catalog:",
+    "@vitest/coverage-v8": "catalog:testing",
     "bumpp": "catalog:cli",
     "eslint": "catalog:cli",
     "publint": "catalog:cli",
