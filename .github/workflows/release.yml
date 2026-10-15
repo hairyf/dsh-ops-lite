@@ -18,7 +18,7 @@ jobs:
 
   publish:
     needs: validate
-    name: Publish the validated platform packages, then the main package
+    name: Publish missing shell pins and validated platform packages, then main
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -36,33 +36,76 @@ jobs:
           pattern: '*-package*'
           merge-multiple: true
           path: npm-packages
-      - name: Verify exact versions and refuse any already-published version before publishing
+      - name: Validate every tarball and check registry versions before any publication
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict'
           import { execFileSync } from 'node:child_process'
-          import { readFileSync } from 'node:fs'
+          import { createHash } from 'node:crypto'
+          import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+          import { payloadExecutable, SHELL_UPSTREAM_PINS } from './src/ops/shell-payloads.js'
           const root = JSON.parse(readFileSync('package.json', 'utf8'))
           assert.equal(process.env.RELEASE_TAG, `v${root.version}`)
-          const names = ['@dshopslite/win32-x64', '@dshopslite/linux-x64', '@dshopslite/darwin-arm64', 'dsh-ops-lite']
-          for (const name of names) {
-            const file = `npm-packages/${name.replace(/^@/, '').replace('/', '-')}-${root.version}.tgz`
-            const packed = JSON.parse(execFileSync('tar', ['-xOf', file, 'package/package.json'], { encoding: 'utf8' }))
-            assert.equal(packed.name, name)
-            assert.equal(packed.version, root.version)
-            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${root.version}`, { signal: AbortSignal.timeout(30000) })
-            assert.equal(response.status, 404, `Refuse to overwrite ${name}@${root.version}, or publish when registry availability is unknown (HTTP ${response.status}).`)
+          const packages = [
+            ...SHELL_UPSTREAM_PINS.map(pin => ({ name: pin.payloadPackage, version: pin.payloadVersion, pin })),
+            ...['@dshopslite/win32-x64', '@dshopslite/linux-x64', '@dshopslite/darwin-arm64', 'dsh-ops-lite'].map(name => ({ name, version: root.version })),
+          ]
+          const filename = ({ name, version }) => `${name.replace(/^@/, '').replace('/', '-')}-${version}.tgz`
+          assert.deepEqual(readdirSync('npm-packages').sort(), packages.map(filename).sort(), 'Unexpected or missing release artifacts')
+          const unpack = (file, member) => JSON.parse(execFileSync('tar', ['-xOf', file, `package/${member}`], { encoding: 'utf8' }))
+          const validate = (item, file) => {
+            const packed = unpack(file, 'package.json')
+            assert.equal(packed.name, item.name)
+            assert.equal(packed.version, item.version)
+            if (item.pin) {
+              const { pin } = item
+              assert.deepEqual(packed.os, [pin.platform])
+              assert.deepEqual(packed.cpu, [pin.arch])
+              assert.equal(packed.scripts, undefined)
+              assert.deepEqual(unpack(file, 'payload.json'), {
+                kind: pin.name,
+                target: `${pin.platform}-${pin.arch}`,
+                version: pin.payloadVersion,
+                executable: payloadExecutable(pin),
+                sha256: pin.executableSha256,
+              })
+              const executable = execFileSync('tar', ['-xOf', file, `package/${payloadExecutable(pin)}`], { maxBuffer: 32 * 1024 * 1024 })
+              assert.equal(createHash('sha256').update(executable).digest('hex'), pin.executableSha256, `Pinned executable mismatch in ${file}`)
+              if (pin.name === 'bash') {
+                const msys = execFileSync('tar', ['-xOf', file, 'package/vendor/bash/win32-x64/usr/bin/msys-2.0.dll'], { maxBuffer: 32 * 1024 * 1024 })
+                assert.equal(createHash('sha256').update(msys).digest('hex'), pin.msysSha256, `Pinned MSYS DLL mismatch in ${file}`)
+              }
+            }
           }
+          // Validate all tested artifacts even when an immutable payload version already exists.
+          for (const item of packages) {
+            item.file = `npm-packages/${filename(item)}`
+            validate(item, item.file)
+          }
+          const publish = []
+          for (const item of packages) {
+            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(item.name)}/${item.version}`, { signal: AbortSignal.timeout(30000) })
+            if (item.pin && response.status === 200) {
+              const existing = await response.json()
+              assert.equal(existing.name, item.name)
+              assert.equal(existing.version, item.version)
+              mkdirSync('npm-existing-payloads', { recursive: true })
+              execFileSync('npm', ['pack', `${item.name}@${item.version}`, '--registry=https://registry.npmjs.org', '--ignore-scripts', '--pack-destination', 'npm-existing-payloads'], { stdio: 'inherit' })
+              validate(item, `npm-existing-payloads/${filename(item)}`)
+              console.log(`Keep verified existing immutable shell pin ${item.name}@${item.version}`)
+              continue
+            }
+            assert.equal(response.status, 404, `Refuse to overwrite ${item.name}@${item.version}, or publish when registry availability is unknown (HTTP ${response.status}).`)
+            publish.push(item.file)
+          }
+          writeFileSync('npm-publish-files.txt', `${publish.join('\n')}\n`)
           NODE
-      - name: Publish the exact tested tarballs with npm trusted publishing or the existing registry token
+      - name: Publish only the exact tested tarballs with no lifecycle scripts, main last
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          VERSION="$(node -p 'require("./package.json").version')"
-          for NAME in @dshopslite/win32-x64 @dshopslite/linux-x64 @dshopslite/darwin-arm64 dsh-ops-lite; do
-            FILE="${NAME#@}"
-            FILE="${FILE/\//-}"
-            npm publish "./npm-packages/$FILE-$VERSION.tgz" --provenance --access public --ignore-scripts
-          done
+          while IFS= read -r FILE; do
+            npm publish "./$FILE" --provenance --access public --ignore-scripts
+          done < npm-publish-files.txt

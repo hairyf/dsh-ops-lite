@@ -381,6 +381,10 @@ importers:
 
   packages/win32-x64: {}
 
+  packages/win32-x64-bash: {}
+
+  packages/win32-x64-pwsh: {}
+
 packages:
 
   '@antfu/eslint-config@9.1.0':

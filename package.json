@@ -41,6 +41,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "dsh-ops-provision-shells": "./scripts/provision-shells.mjs"
+  },
   "files": [
     "README.md",
     "cordis.patch.yml",
@@ -48,13 +51,19 @@
     "dist/*.js",
     "dist/*.map",
     "dist/components",
-    "dist/prepare-workspace.ps1"
+    "dist/prepare-workspace.ps1",
+    "scripts/provision-shells.mjs",
+    "src/ops/provision.js",
+    "src/ops/shell-payloads.js"
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "executableFiles": [
+      "./scripts/provision-shells.mjs"
+    ]
   },
   "dsh": {
     "client": {
@@ -75,6 +84,8 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "lint": "eslint",
+    "postinstall": "node scripts/provision-shells.mjs --postinstall",
+    "provision-shells": "node scripts/provision-shells.mjs",
     "prepack": "pnpm run build",
     "release": "node node_modules/bumpp/bin/bumpp.mjs",
     "start": "tsx src/index.ts",
@@ -87,6 +98,8 @@
     "build": "Build the library for publishing",
     "dev": "Rebuild on change during development",
     "lint": "Check for code style issues",
+    "postinstall": "Best-effort install-time provisioning of missing Windows shell payloads",
+    "provision-shells": "Repair shell payloads in the DSH managed store",
     "prepack": "Build before publishing",
     "release": "Bump version and publish a release",
     "start": "Run the entry file",

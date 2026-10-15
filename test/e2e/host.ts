@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test as base } from '@playwright/test'
 
 const project = fileURLToPath(new URL('../../', import.meta.url))
@@ -77,7 +77,9 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   assert.equal(await realpath(plugin), path.join(await realpath(installation), 'node_modules/dsh-ops-lite'), 'Refuse a checkout copy or externally built plugin.')
   const manifest = JSON.parse(await readFile(path.join(plugin, 'package.json'), 'utf8'))
   assert.equal(manifest.name, 'dsh-ops-lite')
-  assert.equal(manifest.scripts?.install, undefined, 'The main package must not compile or download runtimes during installation.')
+  assert.equal(manifest.scripts?.preinstall, undefined)
+  assert.equal(manifest.scripts?.install, undefined, 'The main package must not compile native runtimes during installation.')
+  assert.equal(manifest.scripts?.postinstall, 'node scripts/provision-shells.mjs --postinstall', 'Allow only the published shell-provisioning postinstall.')
   const target = `${process.platform}-${process.arch}`
   const runtimeRoot = path.dirname(createRequire(path.join(plugin, 'package.json')).resolve(`@dshopslite/${target}/package.json`))
   assert.equal(await realpath(runtimeRoot), path.join(await realpath(installation), `node_modules/@dshopslite/${target}`))
@@ -124,6 +126,19 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   await writeFile(path.join(workspace, 'native.txt'), 'before-e2e\n')
   // FastCtx's supported idle override prevents its detached test-only daemon holding copied assets open after teardown.
   const env = { ...process.env, DSH_HOME: home, FASTCTX_TEST_RUNTIME_IDLE_MS: '500' }
+  if (process.platform === 'win32') {
+    const store = process.env.DSH_E2E_SHELL_STORE
+    assert(store && path.isAbsolute(store), 'Require the runner\'s verified installed shell store.')
+    assert.equal(await realpath(store), path.join(await realpath(root), 'dsh-home/dsh-ops/shells'), 'Never use a user shell store.')
+    const payloads = await import(pathToFileURL(path.join(plugin, 'src/ops/shell-payloads.js')).href)
+    const hostStore = payloads.shellStoreRoot({ env })
+    await mkdir(path.dirname(hostStore), { recursive: true })
+    // Isolate every host profile without duplicating the roughly 600 MB shell payloads.
+    await symlink(store, hostStore, 'junction')
+    assert.equal(await realpath(hostStore), await realpath(store))
+    for (const kind of ['bash', 'pwsh'])
+      assert.equal(payloads.managedShell({ kind, env })?.source, 'provisioned', `The host's own DSH_HOME must resolve managed ${kind}.`)
+  }
   // Profile reconciliation may recreate webServer; keep its OS-selected port stable across reloads.
   const reservation = createServer()
   const port = await new Promise<number>((resolve, reject) => {

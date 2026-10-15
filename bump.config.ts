@@ -20,7 +20,7 @@ export function syncNativeVersion(root = process.cwd()) {
 }
 
 export default defineConfig({
-  files: ['package.json', 'packages/*/package.json'],
+  files: ['package.json', 'packages/win32-x64/package.json', 'packages/linux-x64/package.json', 'packages/darwin-arm64/package.json'],
   all: true,
   execute({ options: { cwd, commit } }) {
     const pnpm = process.env.npm_execpath

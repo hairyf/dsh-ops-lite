@@ -1,0 +1,16 @@
+{
+  "name": "@dshopslite/win32-x64-pwsh",
+  "version": "7.6.6",
+  "description": "Pinned PowerShell payload for dsh-ops-lite on Windows x64",
+  "license": "MIT AND Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hairyf/dsh-ops-lite.git",
+    "directory": "packages/win32-x64-pwsh"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "exports": { "./package.json": "./package.json" },
+  "files": ["licenses", "payload.json", "vendor"],
+  "publishConfig": { "access": "public" }
+}
