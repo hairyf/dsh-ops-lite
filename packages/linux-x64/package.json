@@ -1,6 +1,6 @@
 {
   "name": "@dshopslite/linux-x64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Linux x64 native runtime for dsh-ops-lite (glibc)",
   "license": "MIT AND Apache-2.0",
   "repository": {

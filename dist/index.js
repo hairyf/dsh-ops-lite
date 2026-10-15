@@ -1,5 +1,5 @@
-import { C as PACKAGE_NAME, S as OFFICIAL_TOOL_SECTIONS, b as OFFICIAL_TOOLS, x as OFFICIAL_TOOLS_DESCRIPTION, y as DEFAULT_CONFIG } from "./workspace-preparation-D85l4ytv.js";
-import { t as applyComponent } from "./ops-BZZPSs4k.js";
+import { C as PACKAGE_NAME, S as OFFICIAL_TOOL_SECTIONS, b as OFFICIAL_TOOLS, x as OFFICIAL_TOOLS_DESCRIPTION, y as DEFAULT_CONFIG } from "./workspace-preparation-Bi50pwsN.js";
+import { t as applyComponent } from "./ops-CqGYpXQY.js";
 import { renderToolsSdk, renderToolsSdkPy } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
 //#region src/config.ts
