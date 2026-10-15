@@ -153,7 +153,7 @@ test('isolated Harness L2: independent components, immediate policy saving, nati
       { title: 'dsh-ops-bash & powershell 7', scope: 'native', tools: ['ops_bash'], name: 'ops_bash', args: { command: 'printf OPS_REENABLED', workdir: host.workspace } },
       { title: 'dsh-ops-file', scope: 'native', tools: fileTools, name: 'ops_inspect_local_file', args: { path: 'native.txt' } },
       { title: 'dsh-ops-background', scope: 'native', tools: backgroundTools, name: 'ops_job_list', args: { status: 'all', limit: 10, offset: 0 } },
-      { title: 'dsh-ops-ptc', scope: 'ptc', tools: ptcTools, name: 'ops_batch', args: { action: 'plan', operations: [{ op: 'copy', path: 'native.txt', to: 'ptc-restored.txt' }] } },
+      { title: 'dsh-ops-ptc', scope: 'ptc', tools: ptcTools, name: 'run_code', args: { description: 'Verify restored PTC batch planning', code: 'return await tools.ops_batch({action:"plan",operations:[{op:"copy",path:"native.txt",to:"ptc-restored.txt"}]});' } },
     ]
     for (const entry of components) {
       const toggle = component(page, entry.title)

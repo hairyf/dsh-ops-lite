@@ -95,7 +95,7 @@ export function apply(ctx, config) {
       res.off('close', abort)
     }
   }
-  ctx.webServer.register({ kind: 'prefix', path: '/__e2e', handler })
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/__e2e', handler }))
   ctx.effect(() => async () => {
     disposed = true
     await Promise.allSettled([...handles.values()].map(handle => handle.dispose()))
