@@ -41,7 +41,7 @@ export function renderToolingPolicy({ published, enableShellTools, mounted, leve
   if (!hasFiles && !hasBash && !hasBackground && !hasPwsh)
     return ''
   const heading = hasBash
-    ? '# Shell routing: bash → PowerShell 7'
+    ? `# Shell routing: bash${hasPwsh ? pwsh7 || levels?.pwsh ? ' → PowerShell 7' : ' → host PowerShell' : ''}`
     : hasFiles ? '# Repository file tools' : hasBackground ? '# Background task tools' : '# Windows-native shell'
   const lines = [heading, '', '| Task | Tool |', '| --- | --- |']
   const row = (raw, task) => {

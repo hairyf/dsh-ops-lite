@@ -1,4 +1,4 @@
-import { _ as resolveBinary, a as denied, d as TOOLING_SECTION, f as hostShellRefusal, g as probeBinary, h as PACKAGE_ROOT, i as MODES, l as SECTION_ORDERS, m as renderToolingPolicy, n as prepareWorkspace, o as BACKGROUND_TOOLS, p as publicToolName, r as resolveWorker, s as BASH_TOOL, t as mountWorkspacePreparation, v as runtimeRoot } from "./workspace-preparation-BNP-8O20.js";
+import { _ as resolveBinary, a as denied, d as TOOLING_SECTION, f as hostShellRefusal, g as probeBinary, h as PACKAGE_ROOT, i as MODES, l as SECTION_ORDERS, m as renderToolingPolicy, n as prepareWorkspace, o as BACKGROUND_TOOLS, p as publicToolName, r as resolveWorker, s as BASH_TOOL, t as mountWorkspacePreparation, v as runtimeRoot } from "./workspace-preparation-BurRV1lU.js";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -481,16 +481,32 @@ var NativeFileTools = class {
 //#region src/ops/session-pwsh.js
 /** A reversible runtime-only config overlay; never edits profile files or services. */
 function mountBundledPwsh(ctx, shells) {
-	if (!shells.pwsh.available || process.platform !== "win32") return;
+	let active = () => false;
+	if (!shells.pwsh.available || process.platform !== "win32") return () => false;
 	ctx.inject(["loader"], (loaderCtx) => {
 		const loader = loaderCtx.get("loader");
-		const matches = (entry) => entry?.options?.id === "pwsh-sandbox" && entry.options.name === "@deepseek-ai/dsh-pwsh-sandbox";
-		const refresh = () => {
-			for (const entry of loader.entries()) if (matches(entry) && entry.fiber?.state === 2) entry.fiber.update(entry.options.config, true);
+		const matches = (entry) => !entry?.disabled && (entry?.options?.id === "pwsh-sandbox" && entry.options.name === "@deepseek-ai/dsh-pwsh-sandbox" || entry?.options?.id === "desktop-windows-pwsh-sandbox" && entry.options.name === "dsh-plugin-desktop/windows-pwsh-sandbox");
+		active = (owner = ctx) => owner.get("shell")?.pwshPath === shells.pwsh.file && [...loader.entries()].some((entry) => matches(entry) && entry.fiber?.state === 2);
+		const overlaid = /* @__PURE__ */ new Set();
+		const refresh = (restoring = false) => {
+			const pending = [];
+			for (const entry of loader.entries()) {
+				if (!matches(entry) || entry.fiber?.state !== 2) continue;
+				if (restoring ? !overlaid.has(entry) : entry.fiber.config.pwshPath.get() === shells.pwsh.file) continue;
+				try {
+					entry.fiber.update(entry.options.config, true);
+					pending.push(entry.fiber.await());
+				} catch (error) {
+					loaderCtx.logger.warn(`dsh-ops: PowerShell runtime overlay failed: ${error.message}`);
+				}
+			}
+			return Promise.allSettled(pending);
 		};
 		const unhook = loaderCtx.on("internal/config", function(_raw, next) {
 			const config = next();
 			if (!matches(this.entry) || this.parent?.fiber?.entry === this.entry) return config;
+			if (config?.pwshPath === shells.pwsh.file) return config;
+			overlaid.add(this.entry);
 			return {
 				...config,
 				pwshPath: shells.pwsh.file
@@ -503,11 +519,13 @@ function mountBundledPwsh(ctx, shells) {
 		loaderCtx.effect(() => () => {
 			if (stopped) return;
 			stopped = true;
+			active = () => false;
 			unhook();
-			refresh();
+			return refresh(true);
 		}, "dsh-ops: restore owning PowerShell executor config");
 		refresh();
 	});
+	return (owner) => active(owner);
 }
 //#endregion
 //#region src/ops/bash-pe.js
@@ -1687,7 +1705,7 @@ async function mountNativeFile(ctx, config, file) {
 }
 async function mountServer(ctx, config, runtime, component) {
 	if (!runtime) return;
-	const { FastCtxTools } = await import("./tools-BBXEwUR-.js");
+	const { FastCtxTools } = await import("./tools-K08y5Xur.js");
 	const background = component === "background";
 	const surface = new FastCtxTools({
 		ctx,
@@ -1739,6 +1757,7 @@ function applyComponent(root, rawConfig, component) {
 	})() : void 0;
 	const shells = component === "shell" ? resolveShells(config) : void 0;
 	if (shells && config.required && (!shells.bash.available || process.platform === "win32" && !shells.pwsh.available)) throw new Error(`dsh-ops-lite: required shell runtime unavailable: ${!shells.bash.available ? shells.bash.detail : shells.pwsh.detail}`);
+	const isBundledPwsh = component === "shell" ? mountBundledPwsh(root, shells) : () => false;
 	const owned = component === "shell" ? [BASH_TOOL, "pwsh"] : component === "file" ? FILE_TOOLS.map(publicToolName) : BACKGROUND_TOOLS.map(publicToolName);
 	if (component === "file") owned.push("read_image");
 	if (config.promptPolicy) root.inject(["systemPrompt"], (ctx) => {
@@ -1749,14 +1768,13 @@ function applyComponent(root, rawConfig, component) {
 			text: (context) => renderToolingPolicy({
 				published: visibleTools(ctx, context.agent).filter((name) => owned.includes(name)),
 				shellComponent: component === "shell",
-				pwsh7: shells?.pwsh.available ?? false,
+				pwsh7: isBundledPwsh(context.agent?.ctx ?? ctx),
 				extraGuidance: config.extraGuidance
 			})
 		}), `dsh-ops: ${component} tooling`);
 	});
 	if (component === "shell") {
 		mountWorkspacePreparation(root);
-		mountBundledPwsh(root, shells);
 		root.inject(["tools"], (ctx) => {
 			mountSessionBash(ctx, config, shells);
 			if (config.shellPolicy === "deny-host-shell") installHostShellDenial(ctx, config);

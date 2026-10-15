@@ -179,7 +179,7 @@ function renderToolingPolicy({ published, enableShellTools, mounted, levels, pws
 	const hasPwsh = shellComponent && names.has("pwsh");
 	if (!hasFiles && !hasBash && !hasBackground && !hasPwsh) return "";
 	const lines = [
-		hasBash ? "# Shell routing: bash → PowerShell 7" : hasFiles ? "# Repository file tools" : hasBackground ? "# Background task tools" : "# Windows-native shell",
+		hasBash ? `# Shell routing: bash${hasPwsh ? pwsh7 || levels?.pwsh ? " → PowerShell 7" : " → host PowerShell" : ""}` : hasFiles ? "# Repository file tools" : hasBackground ? "# Background task tools" : "# Windows-native shell",
 		"",
 		"| Task | Tool |",
 		"| --- | --- |"

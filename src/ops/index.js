@@ -142,6 +142,7 @@ export function applyComponent(root, rawConfig, component) {
   const shells = component === 'shell' ? resolveShells(config) : undefined
   if (shells && config.required && (!shells.bash.available || (process.platform === 'win32' && !shells.pwsh.available)))
     throw new Error(`dsh-ops-lite: required shell runtime unavailable: ${!shells.bash.available ? shells.bash.detail : shells.pwsh.detail}`)
+  const isBundledPwsh = component === 'shell' ? mountBundledPwsh(root, shells) : () => false
   const owned = component === 'shell'
     ? [BASH_TOOL, 'pwsh']
     : component === 'file' ? FILE_TOOLS.map(publicToolName) : BACKGROUND_TOOLS.map(publicToolName)
@@ -156,7 +157,7 @@ export function applyComponent(root, rawConfig, component) {
         text: context => renderToolingPolicy({
           published: visibleTools(ctx, context.agent).filter(name => owned.includes(name)),
           shellComponent: component === 'shell',
-          pwsh7: shells?.pwsh.available ?? false,
+          pwsh7: isBundledPwsh(context.agent?.ctx ?? ctx),
           extraGuidance: config.extraGuidance,
         }),
       }), `dsh-ops: ${component} tooling`)
@@ -164,7 +165,6 @@ export function applyComponent(root, rawConfig, component) {
   }
   if (component === 'shell') {
     mountWorkspacePreparation(root)
-    mountBundledPwsh(root, shells)
     root.inject(['tools'], (ctx) => {
       mountSessionBash(ctx, config, shells)
       if (config.shellPolicy === 'deny-host-shell')
