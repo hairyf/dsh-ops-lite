@@ -30,14 +30,14 @@
 pnpm build
 pnpm --config.ignore-scripts=true pack --pack-destination .cache
 node scripts/measure-install.mjs dsh-ops@0.3.0
-node scripts/measure-install.mjs .cache/dsh-ops-next-0.1.0.tgz
+node scripts/measure-install.mjs .cache/dsh-ops-lite-0.1.0.tgz
 ```
 
 [测量脚本](<../scripts/measure-install.mjs>) 只创建和删除自己的临时目录；不安装到用户 Harness。Windows-only 上游 payload 的此项比较不能外推为 Unix 数据。
 
 ## 检查与 E2E
 
-[CI](https://github.com/hairyf/dsh-ops-next/actions/workflows/ci.yml) 在三平台运行本地检查、原生 Rust 回归和真实隔离 Harness + Chromium L2。必须查看交付提交对应的所有适用 job；旧提交、跳过或只做编译不算功能通过。
+[CI](https://github.com/hairyf/dsh-ops-lite/actions/workflows/ci.yml) 在三平台运行本地检查、原生 Rust 回归和真实隔离 Harness + Chromium L2。必须查看交付提交对应的所有适用 job；旧提交、跳过或只做编译不算功能通过。
 
 [E2E runner](<../test/e2e/run.mjs>) 独立安装固定版本 `@deepseek-ai/dsh@0.2.1-alpha.1`，校验实际路径和版本，隔离 profile/home/workspace，随机端口，不回退到既有 Harness，不修改 core renderer，不调用 LLM。这不是 Tauri WebDriver L3。
 

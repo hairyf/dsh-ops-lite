@@ -13,7 +13,7 @@ export function workerName(platform = process.platform) {
 }
 export function resolveWorker(config = {}, { packageRoot = PACKAGE_ROOT, env = process.env, platform = process.platform, arch = process.arch } = {}) {
   if (!PLATFORMS.includes(`${platform}-${arch}`))
-    throw new Error(`Unsupported dsh-ops-next runtime target ${platform}-${arch}.`)
+    throw new Error(`Unsupported dsh-ops-lite runtime target ${platform}-${arch}.`)
   const explicit = config.binaryPath ?? env.DSH_OPS_WORKER_BIN
   const candidates = explicit !== undefined
     ? [explicit]

@@ -1,17 +1,17 @@
 {
-  "name": "dsh-ops-next",
+  "name": "dsh-ops-lite",
   "type": "module",
   "version": "0.1.0",
   "packageManager": "pnpm@11.15.1",
   "description": "Maintained dsh-ops fork with native file tools, Bash, background jobs and PTC",
   "author": "Hairy <wwu710632@gmail.com>",
   "license": "MIT AND Apache-2.0",
-  "homepage": "https://github.com/hairyf/dsh-ops-next#readme",
+  "homepage": "https://github.com/hairyf/dsh-ops-lite#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hairyf/dsh-ops-next.git"
+    "url": "git+https://github.com/hairyf/dsh-ops-lite.git"
   },
-  "bugs": "https://github.com/hairyf/dsh-ops-next/issues",
+  "bugs": "https://github.com/hairyf/dsh-ops-lite/issues",
   "keywords": ["dsh", "deepseek-harness", "plugin", "operations"],
   "sideEffects": false,
   "exports": {

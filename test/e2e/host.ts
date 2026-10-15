@@ -65,7 +65,7 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   assert(root && cli, 'Use node test/e2e/run.mjs; DSH_E2E_DSH_BIN must be an independent temporary installation, with no fallback.')
   assert(path.isAbsolute(root) && path.isAbsolute(cli), 'Require explicit absolute test paths.')
   assert.equal(path.dirname(await realpath(root)), await realpath(tmpdir()), 'Require a test-owned temporary root.')
-  assert(path.basename(root).startsWith('dsh-ops-next-e2e-'))
+  assert(path.basename(root).startsWith('dsh-ops-lite-e2e-'))
   const installation = path.join(root, 'installation')
   const expectedCli = path.join(installation, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
   assert.equal(await realpath(cli), await realpath(expectedCli), 'Refuse an external or user-installed Harness.')
@@ -87,7 +87,7 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   await mkdir(workspace, { recursive: true })
   await mkdir(info.outputPath(''), { recursive: true })
   const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
-  assert.equal(manifest.name, 'dsh-ops-next', 'Build the final plugin, not the untouched starter.')
+  assert.equal(manifest.name, 'dsh-ops-lite', 'Build the final plugin, not the untouched starter.')
   await access(path.join(project, 'dist/index.js'))
   await access(path.join(project, `dist/runtime/${process.platform}-${process.arch}/dsh-ops-worker${process.platform === 'win32' ? '.exe' : ''}`))
   // Copy built plugin only; all SDK imports resolve from this independent CLI tree.
@@ -97,15 +97,15 @@ async function createHost(info: TestInfo): Promise<Host & { stop: () => Promise<
   await mkdir(path.join(profile, 'node_modules'), { recursive: true })
   // A single SDK identity: the plugin resolves imports through the fresh CLI tree.
   await symlink(path.join(installation, 'node_modules'), path.join(plugin, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
-  await symlink(plugin, path.join(profile, 'node_modules/dsh-ops-next'), process.platform === 'win32' ? 'junction' : 'dir')
+  await symlink(plugin, path.join(profile, 'node_modules/dsh-ops-lite'), process.platform === 'win32' ? 'junction' : 'dir')
   const token = randomBytes(24).toString('hex')
   const helper = path.join(profile, 'e2e-api.mjs')
   await cp(fileURLToPath(new URL('./api-plugin.mjs', import.meta.url)), helper)
   await writeFile(path.join(profile, 'package.json'), JSON.stringify({
-    name: 'dsh-ops-next-e2e-profile',
+    name: 'dsh-ops-lite-e2e-profile',
     private: true,
-    dependencies: { 'dsh-ops-next': `file:${plugin}` },
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-ops-next'] } },
+    dependencies: { 'dsh-ops-lite': `file:${plugin}` },
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-ops-lite'] } },
   }))
   await writeFile(path.join(profile, 'cordis.patch.yml'), [
     // The real official global implementation exercises SDK restrictions;

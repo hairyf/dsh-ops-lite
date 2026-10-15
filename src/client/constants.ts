@@ -18,11 +18,11 @@ export const TOGGLE_LABEL = '禁用官方基础工具'
 export const TOGGLE_DESCRIPTION = OFFICIAL_TOOLS_DESCRIPTION
 
 export const CLASSES = {
-  root: 'dsh-ops-next-config',
-  summary: 'dsh-ops-next-summary',
-  row: 'dsh-ops-next-row',
-  rowText: 'dsh-ops-next-row-text',
-  rowTitle: 'dsh-ops-next-row-title',
-  rowDescription: 'dsh-ops-next-row-description',
-  status: 'dsh-ops-next-status',
+  root: 'dsh-ops-lite-config',
+  summary: 'dsh-ops-lite-summary',
+  row: 'dsh-ops-lite-row',
+  rowText: 'dsh-ops-lite-row-text',
+  rowTitle: 'dsh-ops-lite-row-title',
+  rowDescription: 'dsh-ops-lite-row-description',
+  status: 'dsh-ops-lite-status',
 } as const

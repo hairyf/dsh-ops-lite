@@ -13,7 +13,7 @@ const ptcTools = ['ops_batch', 'ops_result']
 
 async function openSettings(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^(?:Plugins|插件)$/ }).click()
-  await page.getByRole('button', { name: /^(?:View|查看) (?:dsh-ops-next|dsh-ops-file)$/i }).click()
+  await page.getByRole('button', { name: /^(?:View|查看) (?:dsh-ops-lite|dsh-ops-file)$/i }).click()
 }
 
 async function reloadSettings(page: Page): Promise<void> {

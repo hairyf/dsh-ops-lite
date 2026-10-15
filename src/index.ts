@@ -83,7 +83,7 @@ function disableOfficialTools(ctx: Context): void {
       lift()
   })
   ctx.on('tools/change', refresh)
-  ctx.effect(() => ctx.tools.guard(exec => denied.has(exec.name) ? 'Official basic tools are disabled by dsh-ops-next. Use the enabled ops_* capabilities or change the plugin setting.' : undefined), 'dsh-ops-next: official tool execution denial')
+  ctx.effect(() => ctx.tools.guard(exec => denied.has(exec.name) ? 'Official basic tools are disabled by dsh-ops-lite. Use the enabled ops_* capabilities or change the plugin setting.' : undefined), 'dsh-ops-lite: official tool execution denial')
   ctx.effect(() => () => {
     updating = true
     for (const owned of lifts.values()) {
@@ -91,7 +91,7 @@ function disableOfficialTools(ctx: Context): void {
         lift()
     }
     lifts.clear()
-  }, 'dsh-ops-next: restore official tool visibility')
+  }, 'dsh-ops-lite: restore official tool visibility')
   refresh()
 }
 
@@ -120,6 +120,6 @@ export async function apply(ctx: Context, config: OpsConfigRef): Promise<void> {
     stopped = true
     await chain.catch(() => {})
     await current?.dispose()
-  }, 'dsh-ops-next: official tool policy')
+  }, 'dsh-ops-lite: official tool policy')
   await reconcile()
 }

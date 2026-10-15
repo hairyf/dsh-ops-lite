@@ -1,6 +1,6 @@
 import type { OpsConfig } from './types'
 
-export const PACKAGE_NAME = 'dsh-ops-next'
+export const PACKAGE_NAME = 'dsh-ops-lite'
 export const CONFIG_ROW_ID = 'dsh-ops-next-file'
 export const OFFICIAL_TOOLS = ['read', 'write', 'edit', 'glob', 'grep', 'bash', 'pwsh', 'pwsh_persistent'] as const
 export const OFFICIAL_TOOL_SECTIONS = ['tool:read', 'tool:write', 'tool:edit', 'tool:glob', 'tool:grep', 'tool:bash', 'tool:pwsh'] as const

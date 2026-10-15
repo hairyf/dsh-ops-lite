@@ -1,4 +1,4 @@
-# dsh-ops-next
+# dsh-ops-lite
 
 [![npm version][npm-version-src]][npm-version-href]
 [![npm downloads][npm-downloads-src]][npm-downloads-href]
@@ -10,7 +10,7 @@
 基于 [T-Auto/dsh-ops](<https://github.com/T-Auto/dsh-ops>) fork，仅新增以下改动：
 
 - **多平台适配**：支持 Windows、macOS、Linux 的平台原生运行时构建。
-- **多平台 E2E 测试**：[CI](<https://github.com/hairyf/dsh-ops-next/actions/workflows/ci.yml>) 配置 Windows、macOS、Linux 的真实隔离 Harness + Playwright 测试。
+- **多平台 E2E 测试**：[CI](<https://github.com/hairyf/dsh-ops-lite/actions/workflows/ci.yml>) 配置 Windows、macOS、Linux 的真实隔离 Harness + Playwright 测试。
 - **禁用官方基础工具配置**：默认开启，切换即保存。开启后禁用官方基础文件与 Shell 工具，保留 read_image，不改变权限或沙箱。
 
 徽章显示各服务的实际状态，不表示包已发布或覆盖率报告已上传。
@@ -36,15 +36,15 @@
 
 <!-- Badges -->
 
-[npm-version-src]: https://img.shields.io/npm/v/dsh-ops-next?style=flat&colorA=080f12&colorB=1fa669
-[npm-version-href]: https://npmjs.com/package/dsh-ops-next
-[npm-downloads-src]: https://img.shields.io/npm/dm/dsh-ops-next?style=flat&colorA=080f12&colorB=1fa669
-[npm-downloads-href]: https://npmjs.com/package/dsh-ops-next
-[bundle-src]: https://img.shields.io/bundlephobia/minzip/dsh-ops-next?style=flat&colorA=080f12&colorB=1fa669&label=minzip
-[bundle-href]: https://bundlephobia.com/result?p=dsh-ops-next
+[npm-version-src]: https://img.shields.io/npm/v/dsh-ops-lite?style=flat&colorA=080f12&colorB=1fa669
+[npm-version-href]: https://npmjs.com/package/dsh-ops-lite
+[npm-downloads-src]: https://img.shields.io/npm/dm/dsh-ops-lite?style=flat&colorA=080f12&colorB=1fa669
+[npm-downloads-href]: https://npmjs.com/package/dsh-ops-lite
+[bundle-src]: https://img.shields.io/bundlephobia/minzip/dsh-ops-lite?style=flat&colorA=080f12&colorB=1fa669&label=minzip
+[bundle-href]: https://bundlephobia.com/result?p=dsh-ops-lite
 [jsdocs-src]: https://img.shields.io/badge/jsdocs-reference-080f12?style=flat&colorA=080f12&colorB=1fa669
-[jsdocs-href]: https://www.jsdocs.io/package/dsh-ops-next
-[coverage-src]: https://codecov.io/gh/hairyf/dsh-ops-next/graph/badge.svg
-[coverage-href]: https://codecov.io/gh/hairyf/dsh-ops-next
-[license-src]: https://img.shields.io/github/license/hairyf/dsh-ops-next.svg?style=flat&colorA=080f12&colorB=1fa669
-[license-href]: https://github.com/hairyf/dsh-ops-next/blob/main/LICENSE.md
+[jsdocs-href]: https://www.jsdocs.io/package/dsh-ops-lite
+[coverage-src]: https://codecov.io/gh/hairyf/dsh-ops-lite/graph/badge.svg
+[coverage-href]: https://codecov.io/gh/hairyf/dsh-ops-lite
+[license-src]: https://img.shields.io/github/license/hairyf/dsh-ops-lite.svg?style=flat&colorA=080f12&colorB=1fa669
+[license-href]: https://github.com/hairyf/dsh-ops-lite/blob/main/LICENSE.md

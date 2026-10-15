@@ -141,7 +141,7 @@ export function applyComponent(root, rawConfig, component) {
     : undefined
   const shells = component === 'shell' ? resolveShells(config) : undefined
   if (shells && config.required && (!shells.bash.available || (process.platform === 'win32' && !shells.pwsh.available)))
-    throw new Error(`dsh-ops-next: required shell runtime unavailable: ${!shells.bash.available ? shells.bash.detail : shells.pwsh.detail}`)
+    throw new Error(`dsh-ops-lite: required shell runtime unavailable: ${!shells.bash.available ? shells.bash.detail : shells.pwsh.detail}`)
   const owned = component === 'shell'
     ? [BASH_TOOL, 'pwsh']
     : component === 'file' ? FILE_TOOLS.map(publicToolName) : BACKGROUND_TOOLS.map(publicToolName)

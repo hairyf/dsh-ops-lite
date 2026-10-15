@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 
 // Test-only driver: real Agents and the public registry pipeline, without an LLM.
-export const name = 'dsh-ops-next-e2e-api'
+export const name = 'dsh-ops-lite-e2e-api'
 export const inject = ['webServer', 'agents', 'agentPresets', 'tools', 'permissionPresets', 'systemPrompt']
 
 export function apply(ctx, config) {
